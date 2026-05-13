@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>选股助手</title>
+    <link rel="stylesheet" href="./styles.css?v=20260513-1" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="选股助手">
+        <div>
+          <p class="eyebrow">A-Share Picker</p>
+          <h1>选股助手</h1>
+        </div>
+        <div class="meta">
+          <span id="clockText">--</span>
+          <span id="updateStatus">数据已准备</span>
+          <button id="refreshButton" class="icon-button" type="button" title="刷新行情">
+            <span aria-hidden="true">↻</span>
+            <span class="sr-only">刷新行情</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="controls" aria-label="股票和选股设置">
+        <form id="stockForm" class="stock-form">
+          <label>
+            <span>股票代码</span>
+            <input id="codeInput" name="code" inputmode="numeric" autocomplete="off" placeholder="002716" />
+          </label>
+          <label>
+            <span>股票名称</span>
+            <input id="nameInput" name="name" autocomplete="off" placeholder="湖南白银" />
+          </label>
+          <label>
+            <span>现价（可选）</span>
+            <input id="manualPriceInput" name="manualPrice" inputmode="decimal" autocomplete="off" placeholder="行情失败时填写" />
+          </label>
+          <label class="wide">
+            <span>备注</span>
+            <input id="remarkInput" name="remark" autocomplete="off" placeholder="关注原因、题材、风控备注" />
+          </label>
+          <button id="saveStockButton" class="primary" type="submit">添加股票</button>
+          <button id="clearFormButton" class="secondary" type="button">清空</button>
+        </form>
+
+        <form id="settingsForm" class="settings-form">
+          <label>
+            <span>最低价</span>
+            <input id="minPriceInput" name="minPrice" type="number" min="0" step="0.01" />
+          </label>
+          <label>
+            <span>最高价</span>
+            <input id="maxPriceInput" name="maxPrice" type="number" min="0" step="0.01" />
+          </label>
+          <label>
+            <span>选股时间</span>
+            <input id="pickTimeInput" name="pickTime" type="time" />
+          </label>
+          <label>
+            <span>买入量（手）</span>
+            <input id="lotInput" name="lot" type="number" min="1" step="1" />
+          </label>
+          <button class="primary" type="submit">保存设置</button>
+          <button id="pickNowButton" class="secondary" type="button">现在选股</button>
+        </form>
+
+        <div class="search-row">
+          <label>
+            <span>查询</span>
+            <input id="searchInput" autocomplete="off" placeholder="名称、代码或备注" />
+          </label>
+          <div class="setting-summary" id="settingSummary"></div>
+        </div>
+      </section>
+
+      <section class="assistant-panel" aria-label="AI选股助手">
+        <div class="assistant-head">
+          <div>
+            <h2>AI 协作选股</h2>
+            <p>无 API 模式：网页先筛出候选，再生成可复制给 ChatGPT 或 Codex 的分析提示词。</p>
+          </div>
+          <div class="assistant-actions">
+            <button id="copyPromptButton" class="secondary" type="button">复制提示词</button>
+            <a class="primary link-button" href="https://chat.openai.com/" target="_blank" rel="noopener noreferrer">打开 ChatGPT</a>
+          </div>
+        </div>
+        <div id="pickResult" class="pick-result">
+          暂无选股结果。到达设置时间后，页面打开时会自动生成一次候选；也可以点击“现在选股”。
+        </div>
+        <label class="prompt-box">
+          <span>给 ChatGPT/Codex 的提示词</span>
+          <textarea id="promptOutput" rows="7" readonly></textarea>
+        </label>
+      </section>
+
+      <section class="table-wrap" aria-label="股票列表">
+        <table>
+          <thead>
+            <tr>
+              <th>股票</th>
+              <th>现价</th>
+              <th>涨跌幅</th>
+              <th>今高 / 今低</th>
+              <th>成交额</th>
+              <th>所属范围</th>
+              <th>备注</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="stockRows"></tbody>
+        </table>
+        <div id="emptyState" class="empty" hidden>暂无匹配股票</div>
+      </section>
+    </main>
+
+    <template id="rowTemplate">
+      <tr>
+        <td data-key="identity"></td>
+        <td data-key="price"></td>
+        <td data-key="change"></td>
+        <td data-key="range"></td>
+        <td data-key="turnover"></td>
+        <td data-key="priceFit"></td>
+        <td data-key="remark"></td>
+        <td data-key="updatedAt"></td>
+        <td>
+          <button class="edit" type="button">编辑</button>
+          <button class="delete" type="button">删除</button>
+        </td>
+      </tr>
+    </template>
+
+    <script src="./app.js?v=20260513-1"></script>
+  </body>
+</html>
