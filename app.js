@@ -9,7 +9,7 @@ const DEFAULT_SETTINGS = {
   lot: 1,
 };
 
-const EMPTY_PICK_TEXT = "暂无选股结果。到达设置时间后，页面打开时会自动生成一次候选；也可以点击“现在选股”。";
+const EMPTY_PICK_TEXT = "暂无选股结果。到达默认时间后，页面打开时会自动生成一次候选；也可以点击“现在选股”。";
 
 const state = {
   stocks: [],
@@ -26,14 +26,12 @@ const els = {
   form: document.querySelector("#stockForm"),
   code: document.querySelector("#codeInput"),
   name: document.querySelector("#nameInput"),
-  manualPrice: document.querySelector("#manualPriceInput"),
   remark: document.querySelector("#remarkInput"),
   saveStock: document.querySelector("#saveStockButton"),
   clearForm: document.querySelector("#clearFormButton"),
   settingsForm: document.querySelector("#settingsForm"),
   minPrice: document.querySelector("#minPriceInput"),
   maxPrice: document.querySelector("#maxPriceInput"),
-  pickTime: document.querySelector("#pickTimeInput"),
   lot: document.querySelector("#lotInput"),
   settingSummary: document.querySelector("#settingSummary"),
   search: document.querySelector("#searchInput"),
@@ -271,22 +269,20 @@ async function hydrateStock(entry) {
   };
 }
 
-function manualStock(entry, manualPrice) {
-  const price = Number(manualPrice);
-  const validPrice = Number.isFinite(price) && price > 0 ? price : null;
+function manualStock(entry) {
   return {
     ...entry,
     name: entry.name || entry.code,
-    price: validPrice,
-    high: validPrice,
-    low: validPrice,
-    open: validPrice,
+    price: null,
+    high: null,
+    low: null,
+    open: null,
     previousClose: null,
     changeAmount: null,
     changePercent: null,
     volume: null,
     turnover: null,
-    updatedAt: validPrice ? `${formatDate(new Date())} 手动` : "",
+    updatedAt: "",
     refreshedAt: new Date().toISOString(),
     business: entry.business || "",
     remark: entry.remark || "",
@@ -294,23 +290,9 @@ function manualStock(entry, manualPrice) {
   };
 }
 
-function applyManualPrice(stock, manualPrice) {
-  const price = Number(manualPrice);
-  if (!Number.isFinite(price) || price <= 0) return stock;
-  return {
-    ...stock,
-    price,
-    high: Number(stock.high) > 0 ? stock.high : price,
-    low: Number(stock.low) > 0 ? stock.low : price,
-    open: Number(stock.open) > 0 ? stock.open : price,
-    updatedAt: stock.updatedAt || `${formatDate(new Date())} 手动`,
-  };
-}
-
 function fillSettingsForm() {
   els.minPrice.value = state.settings.minPrice;
   els.maxPrice.value = state.settings.maxPrice;
-  els.pickTime.value = state.settings.pickTime;
   els.lot.value = state.settings.lot;
 }
 
@@ -352,7 +334,7 @@ function setTrend(cell, value) {
 function renderSummary() {
   const eligible = state.stocks.filter(priceFits).length;
   const lotShares = Number(state.settings.lot) * 100;
-  els.settingSummary.textContent = `价格区间：${money(state.settings.minPrice)} - ${money(state.settings.maxPrice)} 元；选股时间：${state.settings.pickTime}；买入量：${state.settings.lot} 手（${lotShares} 股）；符合区间：${eligible} 只`;
+  els.settingSummary.textContent = `价格区间：${money(state.settings.minPrice)} - ${money(state.settings.maxPrice)} 元；默认时间：${DEFAULT_SETTINGS.pickTime}；买入量：${state.settings.lot} 手（${lotShares} 股）；符合区间：${eligible} 只`;
 }
 
 function renderPickResult() {
@@ -421,7 +403,6 @@ function editStock(code) {
   state.editingCode = code;
   els.code.value = stock.code;
   els.name.value = stock.name || "";
-  els.manualPrice.value = Number(stock.price) > 0 ? Number(stock.price).toFixed(2) : "";
   els.remark.value = stock.remark || "";
   els.code.disabled = true;
   els.saveStock.textContent = "保存修改";
@@ -445,13 +426,12 @@ async function upsertStockFromForm(event) {
   event.preventDefault();
   const rawCode = normalizeCode(els.code.value);
   const rawName = els.name.value.trim();
-  const manualPrice = els.manualPrice.value;
   const remark = els.remark.value.trim();
 
   try {
     if (state.editingCode) {
       state.stocks = state.stocks.map((stock) =>
-        stock.code === state.editingCode ? applyManualPrice({ ...stock, name: rawName || stock.name, remark }, manualPrice) : stock,
+        stock.code === state.editingCode ? { ...stock, name: rawName || stock.name, remark } : stock,
       );
       saveStocks();
       clearForm();
@@ -473,9 +453,8 @@ async function upsertStockFromForm(event) {
     try {
       hydrated = await hydrateStock({ ...entry, remark });
     } catch {
-      hydrated = manualStock({ ...entry, remark }, manualPrice);
+      hydrated = manualStock({ ...entry, remark });
     }
-    hydrated = applyManualPrice(hydrated, manualPrice);
     state.stocks = [hydrated, ...state.stocks.filter((stock) => stock.code !== hydrated.code)];
     saveStocks();
     clearForm();
@@ -541,7 +520,7 @@ function buildPrompt(selectedStock) {
 
   return `请你作为谨慎的 A 股分析助手，基于我提供的列表，从符合价格区间的股票里选出 1 只“观察/买入候选”，并说明理由和风险点。请不要假设你能看到实时行情，只使用下面数据；如果信息不足，请直接说不足，不要强行推荐。输出请包含：候选股票、为什么符合、需要回避的风险、买入量提醒、以及“不构成投资建议”。\n\n我的设置：价格区间 ${money(
     state.settings.minPrice,
-  )} - ${money(state.settings.maxPrice)} 元；选股时间 ${state.settings.pickTime}；计划买入 ${state.settings.lot} 手（${
+  )} - ${money(state.settings.maxPrice)} 元；默认选股时间 ${DEFAULT_SETTINGS.pickTime}；计划买入 ${state.settings.lot} 手（${
     Number(state.settings.lot) * 100
   } 股）。\n\n网页本地初筛候选：${selectedStock.name || selectedStock.code}（${selectedStock.code}）。\n\n候选列表：\n${candidates}`;
 }
@@ -569,7 +548,7 @@ function maybeAutoPick() {
   if (state.stocks.length === 0) return;
   const now = chinaNow();
   const today = formatDate(now);
-  const [hour, minute] = state.settings.pickTime.split(":").map(Number);
+  const [hour, minute] = DEFAULT_SETTINGS.pickTime.split(":").map(Number);
   const reached = now.getHours() > hour || (now.getHours() === hour && now.getMinutes() >= minute);
   if (!reached) return;
   if (state.lastPick && state.lastPick.date === today) return;
@@ -588,7 +567,7 @@ function saveSettingsFromForm(event) {
   state.settings = {
     minPrice,
     maxPrice,
-    pickTime: els.pickTime.value || DEFAULT_SETTINGS.pickTime,
+    pickTime: DEFAULT_SETTINGS.pickTime,
     lot,
   };
   fillSettingsForm();
