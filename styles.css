@@ -122,11 +122,11 @@ h2 {
 }
 
 .stock-form {
-  grid-template-columns: 140px 170px 140px minmax(0, 1fr) auto auto;
+  grid-template-columns: 150px 180px minmax(0, 1fr) auto auto;
 }
 
 .settings-form {
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto;
 }
 
 .search-row {
