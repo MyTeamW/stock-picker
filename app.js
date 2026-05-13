@@ -345,7 +345,7 @@ function renderPickResult() {
   }
   const { pickedAt, reason } = state.lastPick;
   const stock = state.stocks.find((item) => item.code === state.lastPick.stock.code) || state.lastPick.stock;
-  els.pickResult.innerHTML = `本地初筛候选：<strong>${stock.name || stock.code}（${stock.code}）</strong>，现价 ${money(
+  els.pickResult.innerHTML = `候选：<strong>${stock.name || stock.code}（${stock.code}）</strong>，现价 ${money(
     stock.price,
   )} 元，买入量 ${state.settings.lot} 手。${reason} <span class="muted">生成时间：${pickedAt}</span>`;
   els.promptOutput.value = buildPrompt(stock);
@@ -518,11 +518,11 @@ function buildPrompt(selectedStock) {
     })
     .join("\n");
 
-  return `请你作为谨慎的 A 股分析助手，基于我提供的列表，从符合价格区间的股票里选出 1 只“观察/买入候选”，并说明理由和风险点。请不要假设你能看到实时行情，只使用下面数据；如果信息不足，请直接说不足，不要强行推荐。输出请包含：候选股票、为什么符合、需要回避的风险、买入量提醒、以及“不构成投资建议”。\n\n我的设置：价格区间 ${money(
+  return `请你作为谨慎的 A 股分析助手，基于我提供的列表，从符合价格区间的股票里选出 1 只“买入候选”，并说明理由和风险点。我在下午两点半左右给你的列表，请结合今日实时数据进行分析。输出请包含但不限于：候选股票、为什么符合、需要回避的风险、买入量提醒、买法（例如：不追 68.5 元以上。理想买点：64.8–66.3 元附近低吸。止损：跌破 63.5 元，短线走。目标：先看 69.5–72 元。）。\n\n我的设置：价格区间 ${money(
     state.settings.minPrice,
   )} - ${money(state.settings.maxPrice)} 元；默认选股时间 ${DEFAULT_SETTINGS.pickTime}；计划买入 ${state.settings.lot} 手（${
     Number(state.settings.lot) * 100
-  } 股）。\n\n网页本地初筛候选：${selectedStock.name || selectedStock.code}（${selectedStock.code}）。\n\n候选列表：\n${candidates}`;
+  } 股）。\n\n候选：${selectedStock.name || selectedStock.code}（${selectedStock.code}）。\n\n候选列表：\n${candidates}`;
 }
 
 function pickStock({ automatic = false } = {}) {
@@ -537,11 +537,11 @@ function pickStock({ automatic = false } = {}) {
 
   const stock = candidates[0];
   const pickedAt = new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "medium" }).format(new Date());
-  const reason = `规则筛选分最高：价格在区间内，涨跌幅和流动性相对更稳。请复制提示词到 ChatGPT/Codex 做最终人工判断；这不是投资建议。`;
+  const reason = `规则筛选分最高：价格在区间内，涨跌幅和流动性相对更稳。请复制提示词到 ChatGPT/Codex 做最终判断。`;
   state.lastPick = { stock, pickedAt, reason, automatic };
   saveLastPick();
   render();
-  setStatus(automatic ? "已按设置时间生成候选" : "已生成本地初筛候选");
+  setStatus(automatic ? "已按设置时间生成候选" : "已生成候选");
 }
 
 function maybeAutoPick() {
