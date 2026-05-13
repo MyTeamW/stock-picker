@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>选股助手</title>
-    <link rel="stylesheet" href="./styles.css?v=20260513-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260513-2" />
   </head>
   <body>
     <main class="shell">
@@ -33,10 +33,6 @@
             <span>股票名称</span>
             <input id="nameInput" name="name" autocomplete="off" placeholder="湖南白银" />
           </label>
-          <label>
-            <span>现价（可选）</span>
-            <input id="manualPriceInput" name="manualPrice" inputmode="decimal" autocomplete="off" placeholder="行情失败时填写" />
-          </label>
           <label class="wide">
             <span>备注</span>
             <input id="remarkInput" name="remark" autocomplete="off" placeholder="关注原因、题材、风控备注" />
@@ -53,10 +49,6 @@
           <label>
             <span>最高价</span>
             <input id="maxPriceInput" name="maxPrice" type="number" min="0" step="0.01" />
-          </label>
-          <label>
-            <span>选股时间</span>
-            <input id="pickTimeInput" name="pickTime" type="time" />
           </label>
           <label>
             <span>买入量（手）</span>
@@ -86,12 +78,15 @@
             <a class="primary link-button" href="https://chat.openai.com/" target="_blank" rel="noopener noreferrer">打开 ChatGPT</a>
           </div>
         </div>
-        <div id="pickResult" class="pick-result">
-          暂无选股结果。到达设置时间后，页面打开时会自动生成一次候选；也可以点击“现在选股”。
-        </div>
         <label class="prompt-box">
           <span>给 ChatGPT/Codex 的提示词</span>
           <textarea id="promptOutput" rows="7" readonly></textarea>
+        </label>
+        <label class="result-box">
+          <span>选股结果</span>
+          <div id="pickResult" class="pick-result">
+            暂无选股结果。到达默认时间后，页面打开时会自动生成一次候选；也可以点击“现在选股”。
+          </div>
         </label>
       </section>
 
@@ -133,6 +128,6 @@
       </tr>
     </template>
 
-    <script src="./app.js?v=20260513-1"></script>
+    <script src="./app.js?v=20260513-2"></script>
   </body>
 </html>
