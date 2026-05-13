@@ -1,6 +1,11 @@
 const STORAGE_KEY = "myteamw-stock-picker-v1";
 const SETTINGS_KEY = "myteamw-stock-picker-settings-v1";
 const PICK_KEY = "myteamw-stock-picker-last-pick-v1";
+const SUPABASE_URL = "https://kawztespuaiztftoifdk.supabase.co";
+const SUPABASE_KEY = "sb_publishable_Ydf2JJK06d4GMTE2awOSwg_3GZLTR27";
+const STOCK_TABLE = "picker_stocks";
+const SETTINGS_TABLE = "picker_settings";
+const SETTINGS_ROW_KEY = "default";
 
 const DEFAULT_SETTINGS = {
   minPrice: 0,
@@ -17,6 +22,7 @@ const state = {
   query: "",
   editingCode: "",
   lastPick: null,
+  remoteReady: false,
 };
 
 const els = {
@@ -116,7 +122,7 @@ function setStatus(text) {
   els.status.textContent = text;
 }
 
-function loadState() {
+function loadLocalState() {
   try {
     state.stocks = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
   } catch {
@@ -146,6 +152,165 @@ function saveSettings() {
 
 function saveLastPick() {
   localStorage.setItem(PICK_KEY, JSON.stringify(state.lastPick));
+}
+
+function supabaseHeaders(extra = {}) {
+  return {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    "Content-Type": "application/json",
+    ...extra,
+  };
+}
+
+async function supabaseRequest(path, options = {}) {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: supabaseHeaders(options.headers),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `Supabase HTTP ${response.status}`);
+  }
+  if (response.status === 204) return null;
+  return response.json();
+}
+
+function fromDb(row) {
+  const asNumber = (value) => (value === null || value === undefined ? null : Number(value));
+  return {
+    code: row.code,
+    name: row.name || row.code,
+    remark: row.remark || "",
+    business: row.business || "",
+    price: asNumber(row.price),
+    high: asNumber(row.high),
+    low: asNumber(row.low),
+    open: asNumber(row.open),
+    previousClose: asNumber(row.previous_close),
+    changeAmount: asNumber(row.change_amount),
+    changePercent: asNumber(row.change_percent),
+    volume: asNumber(row.volume),
+    turnover: asNumber(row.turnover),
+    updatedAt: row.quote_date || "",
+    refreshedAt: row.refreshed_at || "",
+    createdAt: row.created_at || "",
+    deleted: Boolean(row.deleted),
+  };
+}
+
+function toDb(stock) {
+  return {
+    code: stock.code,
+    name: stock.name || stock.code,
+    remark: stock.remark || "",
+    business: stock.business || "",
+    price: numberOrNull(stock.price),
+    high: numberOrNull(stock.high),
+    low: numberOrNull(stock.low),
+    open: numberOrNull(stock.open),
+    previous_close: numberOrNull(stock.previousClose),
+    change_amount: numberOrNull(stock.changeAmount),
+    change_percent: numberOrNull(stock.changePercent),
+    volume: numberOrNull(stock.volume),
+    turnover: numberOrNull(stock.turnover),
+    quote_date: stock.updatedAt || null,
+    refreshed_at: stock.refreshedAt || null,
+    deleted: Boolean(stock.deleted),
+  };
+}
+
+async function loadRemoteState() {
+  const cachedStocks = [...state.stocks];
+  const cachedSettings = { ...state.settings };
+  const [stocks, settingsRows] = await Promise.all([
+    supabaseRequest(`${STOCK_TABLE}?select=*&deleted=eq.false&order=created_at.desc,code.asc`),
+    supabaseRequest(`${SETTINGS_TABLE}?select=value&key=eq.${SETTINGS_ROW_KEY}&limit=1`),
+  ]);
+
+  state.stocks = Array.isArray(stocks) && stocks.length > 0 ? stocks.map(fromDb) : cachedStocks;
+  if (Array.isArray(settingsRows) && settingsRows[0] && settingsRows[0].value) {
+    state.settings = { ...DEFAULT_SETTINGS, ...settingsRows[0].value, pickTime: DEFAULT_SETTINGS.pickTime };
+  } else {
+    state.settings = cachedSettings;
+  }
+  saveStocks();
+  saveSettings();
+}
+
+async function initRemoteState() {
+  try {
+    await loadRemoteState();
+    state.remoteReady = true;
+    fillSettingsForm();
+    render();
+    setStatus("在线数据库已连接");
+  } catch {
+    state.remoteReady = false;
+    setStatus("在线数据库未就绪，正在使用本地缓存");
+  }
+}
+
+async function upsertRemoteStock(stock) {
+  if (!state.remoteReady) return false;
+  try {
+    const rows = await supabaseRequest(`${STOCK_TABLE}?on_conflict=code`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+      body: JSON.stringify(toDb(stock)),
+    });
+    if (Array.isArray(rows) && rows[0]) {
+      const saved = fromDb(rows[0]);
+      state.stocks = [saved, ...state.stocks.filter((item) => item.code !== saved.code)];
+      saveStocks();
+      render();
+    }
+    return true;
+  } catch {
+    state.remoteReady = false;
+    setStatus("在线数据库写入失败，已保存在本地缓存");
+    return false;
+  }
+}
+
+async function patchRemoteStock(code, patch) {
+  if (!state.remoteReady) return false;
+  try {
+    await supabaseRequest(`${STOCK_TABLE}?code=eq.${encodeURIComponent(code)}`, {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(patch),
+    });
+    return true;
+  } catch {
+    state.remoteReady = false;
+    setStatus("在线数据库更新失败，已保存在本地缓存");
+    return false;
+  }
+}
+
+async function upsertRemoteSettings() {
+  if (!state.remoteReady) return false;
+  try {
+    await supabaseRequest(`${SETTINGS_TABLE}?on_conflict=key`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        key: SETTINGS_ROW_KEY,
+        value: {
+          minPrice: state.settings.minPrice,
+          maxPrice: state.settings.maxPrice,
+          pickTime: DEFAULT_SETTINGS.pickTime,
+          lot: state.settings.lot,
+        },
+      }),
+    });
+    return true;
+  } catch {
+    state.remoteReady = false;
+    setStatus("在线设置保存失败，已保存在本地缓存");
+    return false;
+  }
 }
 
 function jsonp(url, callbackParam = "cb") {
@@ -409,7 +574,7 @@ function editStock(code) {
   setStatus(`正在编辑 ${stock.name || stock.code}`);
 }
 
-function deleteStock(code) {
+async function deleteStock(code) {
   const stock = state.stocks.find((item) => item.code === code);
   state.stocks = state.stocks.filter((item) => item.code !== code);
   if (state.lastPick && state.lastPick.stock && state.lastPick.stock.code === code) {
@@ -419,6 +584,8 @@ function deleteStock(code) {
   saveStocks();
   clearForm();
   render();
+  setStatus(`${stock ? stock.name || stock.code : code} 已删除，正在同步`);
+  await patchRemoteStock(code, { deleted: true });
   setStatus(`${stock ? stock.name || stock.code : code} 已删除`);
 }
 
@@ -430,12 +597,16 @@ async function upsertStockFromForm(event) {
 
   try {
     if (state.editingCode) {
+      const editCode = state.editingCode;
       state.stocks = state.stocks.map((stock) =>
-        stock.code === state.editingCode ? { ...stock, name: rawName || stock.name, remark } : stock,
+        stock.code === editCode ? { ...stock, name: rawName || stock.name, remark } : stock,
       );
       saveStocks();
       clearForm();
       render();
+      setStatus("股票信息已保存，正在同步");
+      const saved = state.stocks.find((stock) => stock.code === editCode);
+      if (saved) await upsertRemoteStock(saved);
       setStatus("股票信息已保存");
       return;
     }
@@ -459,6 +630,8 @@ async function upsertStockFromForm(event) {
     saveStocks();
     clearForm();
     render();
+    setStatus(`${hydrated.name || hydrated.code} 已添加，正在同步`);
+    await upsertRemoteStock(hydrated);
     setStatus(`${hydrated.name || hydrated.code} 已添加`);
   } catch (error) {
     setStatus(error.message || "添加失败");
@@ -483,6 +656,10 @@ async function refreshStocks() {
   state.stocks = refreshed;
   saveStocks();
   render();
+  setStatus(`已刷新 ${state.stocks.length} 只股票，正在同步`);
+  for (const stock of state.stocks) {
+    await upsertRemoteStock(stock);
+  }
   setStatus(`已刷新 ${state.stocks.length} 只股票`);
 }
 
@@ -559,7 +736,7 @@ function maybeAutoPick() {
   }
 }
 
-function saveSettingsFromForm(event) {
+async function saveSettingsFromForm(event) {
   event.preventDefault();
   const minPrice = Math.max(0, Number(els.minPrice.value) || 0);
   const maxPrice = Math.max(minPrice, Number(els.maxPrice.value) || DEFAULT_SETTINGS.maxPrice);
@@ -573,6 +750,8 @@ function saveSettingsFromForm(event) {
   fillSettingsForm();
   saveSettings();
   render();
+  setStatus("选股设置已保存，正在同步");
+  await upsertRemoteSettings();
   setStatus("选股设置已保存");
 }
 
@@ -601,10 +780,11 @@ els.search.addEventListener("input", () => {
   render();
 });
 
-loadState();
+loadLocalState();
 fillSettingsForm();
 updateClock();
 render();
+initRemoteState();
 window.setInterval(updateClock, 1000);
 window.setInterval(maybeAutoPick, 30000);
 maybeAutoPick();
