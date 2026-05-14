@@ -362,10 +362,10 @@ def build_result(stocks: list[dict[str, Any]], settings: dict[str, Any], errors:
     ],
     "action": f"不追高；理想关注 {money(buy_low)}-{money(buy_high)} 元，止损 {money(stop)} 元，目标先看 {money(target_1)}-{money(target_2)} 元，最多 {int(settings.get('lot') or 1)} 手试错。",
     "prompt": (
-      "请你作为谨慎的 A 股分析助手，复核这个自动化候选。"
-      f"候选：{stock.get('name')}（{stock.get('code')}），现价 {money(price)} 元，"
+      "请你作为谨慎的 A 股分析助手，每个交易日从股票池中推荐 1 只今日买入观察标的。"
+      f"页面本地排序第一名：{stock.get('name')}（{stock.get('code')}），现价 {money(price)} 元，"
       f"涨跌幅 {percent(stock.get('change_percent'))}，日内高/低 {money(stock.get('high'))}/{money(stock.get('low'))}。"
-      "请输出候选是否仍适合观察、风险点、仓位提醒，并明确不构成投资建议。"
+      "请根据完整股票池和今日行情独立给出最终推荐、风险点、仓位提醒，并明确不构成投资建议。"
     ),
     "candidate_code": stock.get("code"),
     "candidate_name": stock.get("name"),

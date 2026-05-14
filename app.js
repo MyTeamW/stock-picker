@@ -798,11 +798,11 @@ function buildPrompt(selectedStock) {
     })
     .join("\n");
 
-  return `请你作为谨慎的 A 股分析助手，基于我提供的列表，从符合价格区间的股票里选出 1 只“买入候选”，并说明理由和风险点。我在下午两点半左右给你的列表，请结合今日实时数据进行分析。输出请包含但不限于：候选股票、为什么符合、需要回避的风险、买入量提醒、买法（例如：不追 68.5 元以上。理想买点：64.8–66.3 元附近低吸。止损：跌破 63.5 元，短线走。目标：先看 69.5–72 元。）。\n\n我的设置：价格区间 ${money(
+  return `请你作为谨慎的 A 股分析助手，基于我提供的股票列表，每个交易日只推荐 1 只今日买入观察标的，并说明理由和风险点。最终推荐由你根据列表和今日行情独立判断，不要把页面本地排序当成结论。我在下午两点半左右给你的列表，请结合实时数据进行分析。输出请包含但不限于：推荐股票、为什么推荐、需要回避的风险、买入量提醒、买法（例如：不追 68.5 元以上。理想买点：64.8–66.3 元附近低吸。止损：跌破 63.5 元，短线走。目标：先看 69.5–72 元。）。\n\n我的设置：价格区间 ${money(
     state.settings.minPrice,
   )} - ${money(state.settings.maxPrice)} 元；默认选股时间 ${DEFAULT_SETTINGS.pickTime}；计划买入 ${state.settings.lot} 手（${
     Number(state.settings.lot) * 100
-  } 股）。\n\n候选：${selectedStock.name || selectedStock.code}（${selectedStock.code}）。\n\n候选列表：\n${candidates}`;
+  } 股）。\n\n页面本地排序第一名：${selectedStock.name || selectedStock.code}（${selectedStock.code}），只作为阅读顺序参考，不代表最终结论。\n\n股票列表：\n${candidates}`;
 }
 
 function pickStock({ automatic = false } = {}) {

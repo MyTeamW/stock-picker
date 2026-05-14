@@ -107,15 +107,16 @@ def build_page_prompt(settings: dict[str, Any], ranked: list[tuple[float, dict[s
     candidates = "暂无符合价格区间和可用行情的股票。"
 
   return (
-    "请你作为谨慎的 A 股分析助手，基于我提供的列表，从符合价格区间的股票里选出 1 只"
-    "“买入候选”，并说明理由和风险点。我在下午两点半左右给你的列表，请结合今日实时数据进行分析。"
-    "输出请包含但不限于：候选股票、为什么符合、需要回避的风险、买入量提醒、买法"
+    "请你作为谨慎的 A 股分析助手，基于我提供的股票列表，每个交易日只推荐 1 只今日买入观察标的，"
+    "并说明理由和风险点。最终推荐由你根据列表和今日行情独立判断，不要把页面本地排序当成结论。"
+    "我在下午两点半左右给你的列表，请结合实时数据进行分析。输出请包含但不限于：推荐股票、"
+    "为什么推荐、需要回避的风险、买入量提醒、买法"
     "（例如：不追高；理想买点、止损、目标区间）。\n\n"
     f"我的设置：价格区间 {money(settings.get('minPrice'))} - {money(settings.get('maxPrice'))} 元；"
     f"默认选股时间 {settings.get('pickTime') or '14:30'}；计划买入 {int(settings.get('lot') or 1)} 手"
     f"（{int(settings.get('lot') or 1) * 100} 股）。\n\n"
-    f"规则预筛候选：{selected_text}。\n\n"
-    f"候选列表：\n{candidates}"
+    f"页面本地排序第一名：{selected_text}，只作为阅读顺序参考，不代表最终结论。\n\n"
+    f"股票列表：\n{candidates}"
   )
 
 
@@ -126,7 +127,7 @@ def build_writer_schema() -> dict[str, str]:
     "rationale": "必填，字符串数组，列出选择依据",
     "risks": "必填，字符串数组，列出主要风险和放弃条件",
     "action": "必填，操作建议文本，包含不追高、理想买点、止损、目标、买入量提醒",
-    "prompt": "可选，写回页面提示词框的复核提示",
+    "prompt": "可选，写回页面提示词框的每日推荐提示",
     "candidate_code": "可选，6 位股票代码；没有候选时为 null",
     "candidate_name": "可选，股票简称；没有候选时为 null",
     "source_count": "可选，本次读取的股票数量",
