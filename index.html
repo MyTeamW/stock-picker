@@ -71,7 +71,7 @@
         <div class="assistant-head">
           <div>
             <h2>AI 协作选股</h2>
-            <p>无 API 模式：网页先筛出候选，再生成可复制给 ChatGPT 或 Codex 的分析提示词。</p>
+            <p>网页不直接调用模型；Codex 定时自动化写入结果，也可复制提示词手动分析。</p>
           </div>
           <div class="assistant-actions">
             <button id="copyPromptButton" class="secondary" type="button">复制提示词</button>
@@ -85,7 +85,7 @@
         <label class="result-box">
           <span>选股结果</span>
           <div id="pickResult" class="pick-result">
-            暂无选股结果。到达默认时间后，页面打开时会自动生成一次候选；也可以点击“现在选股”。
+            暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示；也可以点击“现在选股”生成本地提示词。
           </div>
         </label>
       </section>

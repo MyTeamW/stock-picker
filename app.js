@@ -11,11 +11,11 @@ const SETTINGS_ROW_KEY = "default";
 const DEFAULT_SETTINGS = {
   minPrice: 0,
   maxPrice: 70,
-  pickTime: "14:35",
+  pickTime: "14:30",
   lot: 1,
 };
 
-const EMPTY_PICK_TEXT = "暂无选股结果。到达默认时间后，页面打开时会自动生成一次候选；也可以点击“现在选股”。";
+const EMPTY_PICK_TEXT = "暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示；也可以点击“现在选股”生成本地提示词。";
 
 const state = {
   stocks: [],
@@ -92,8 +92,14 @@ function money(value) {
 }
 
 function percent(value) {
-  const num = Number(value);
+  const num = normalizePercentValue(value);
   return Number.isFinite(num) ? `${num.toFixed(2)}%` : "-";
+}
+
+function normalizePercentValue(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.abs(num) > 30 ? num / 100 : num;
 }
 
 function compactMoney(value) {
@@ -114,10 +120,36 @@ function quotePrice(value) {
   return Number.isFinite(num) && num > 0 ? num / 100 : null;
 }
 
+function quoteSigned(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num / 100 : null;
+}
+
 function quoteTimestamp(value) {
   const raw = String(value || "");
-  if (raw.length >= 8) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  if (/^\d{14}$/.test(raw)) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+  if (/^\d{13}$/.test(raw) || /^\d{10}$/.test(raw)) {
+    const ms = Number(raw) * (raw.length === 13 ? 1 : 1000);
+    const chinaDate = new Date(new Date(ms).toLocaleString("en-US", { timeZone: "Asia/Shanghai" }));
+    return formatDate(chinaDate);
+  }
+  if (/^\d{8}$/.test(raw)) return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
   return formatDate(new Date());
+}
+
+function normalizeDateText(value, fallback = "") {
+  const raw = String(value || "");
+  if (isValidDateText(raw)) return raw;
+  const fallbackText = String(fallback || "");
+  const fallbackDate = fallbackText.slice(0, 10);
+  if (isValidDateText(fallbackDate)) return fallbackDate;
+  return raw;
+}
+
+function isValidDateText(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00`);
+  return date.getFullYear() >= 2000 && date.getFullYear() <= 2100 && !Number.isNaN(date.getTime());
 }
 
 function setStatus(text) {
@@ -203,7 +235,7 @@ function fromDb(row) {
   const changePercent =
     Number.isFinite(closePrice) && Number.isFinite(startPrice) && startPrice > 0
       ? ((closePrice - startPrice) / startPrice) * 100
-      : asNumber(row.change_percent);
+      : normalizePercentValue(row.change_percent);
   return {
     code: row.code,
     name: row.name || row.code,
@@ -220,7 +252,7 @@ function fromDb(row) {
     changePercent,
     volume: asNumber(row.volume),
     turnover: asNumber(row.turnover),
-    updatedAt: row.last_quote_date || row.quote_date || "",
+    updatedAt: normalizeDateText(row.last_quote_date || row.quote_date, row.refreshed_at),
     refreshedAt: row.refreshed_at || "",
     createdAt: row.created_at || "",
     deleted: Boolean(row.deleted),
@@ -239,7 +271,7 @@ function toDb(stock) {
     open: numberOrNull(stock.open),
     previous_close: numberOrNull(stock.previousClose),
     change_amount: numberOrNull(stock.changeAmount),
-    change_percent: numberOrNull(stock.changePercent),
+    change_percent: normalizePercentValue(stock.changePercent),
     volume: numberOrNull(stock.volume),
     turnover: numberOrNull(stock.turnover),
     quote_date: stock.updatedAt || null,
@@ -453,8 +485,8 @@ async function fetchQuote(code) {
     low: quotePrice(data.f45),
     open: quotePrice(data.f46),
     previousClose: quotePrice(data.f60),
-    changeAmount: quotePrice(data.f169),
-    changePercent: numberOrNull(data.f170),
+    changeAmount: quoteSigned(data.f169),
+    changePercent: quoteSigned(data.f170),
     volume: numberOrNull(data.f47),
     turnover: numberOrNull(data.f48),
     updatedAt: quoteTimestamp(data.f86),
@@ -736,7 +768,7 @@ async function refreshStocks() {
 
 function scoreStock(stock) {
   const price = Number(stock.price);
-  const change = Number(stock.changePercent);
+  const change = normalizePercentValue(stock.changePercent);
   const min = Number(state.settings.minPrice);
   const max = Number(state.settings.maxPrice);
   const span = Math.max(max - min, 1);
@@ -858,5 +890,3 @@ render();
 initRemoteState();
 loadAutomationResult();
 window.setInterval(updateClock, 1000);
-window.setInterval(maybeAutoPick, 30000);
-maybeAutoPick();

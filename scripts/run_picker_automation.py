@@ -69,6 +69,24 @@ def scaled(value: Any, scale: int = 100) -> float | None:
   return number / scale
 
 
+def signed_scaled(value: Any, scale: int = 100) -> float | None:
+  try:
+    number = float(value)
+  except (TypeError, ValueError):
+    return None
+  return number / scale
+
+
+def normalize_percent_value(value: Any) -> float | None:
+  try:
+    number = float(value)
+  except (TypeError, ValueError):
+    return None
+  if abs(number) > 30:
+    return number / 100
+  return number
+
+
 def plain_number(value: Any) -> float | None:
   try:
     number = float(value)
@@ -79,7 +97,13 @@ def plain_number(value: Any) -> float | None:
 
 def quote_date(raw: Any) -> str:
   text = str(raw or "")
-  if len(text) >= 8:
+  if re.fullmatch(r"\d{14}", text):
+    return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+  if re.fullmatch(r"\d{13}", text):
+    return datetime.fromtimestamp(int(text) / 1000, CHINA_TZ).date().isoformat()
+  if re.fullmatch(r"\d{10}", text):
+    return datetime.fromtimestamp(int(text), CHINA_TZ).date().isoformat()
+  if re.fullmatch(r"\d{8}", text):
     return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
   return now_china().date().isoformat()
 
@@ -139,8 +163,8 @@ def fetch_quote(code: str) -> Quote:
     low=scaled(data.get("f45")),
     open=scaled(data.get("f46")),
     previous_close=scaled(data.get("f60")),
-    change_amount=scaled(data.get("f169")),
-    change_percent=plain_number(data.get("f170")),
+    change_amount=signed_scaled(data.get("f169")),
+    change_percent=signed_scaled(data.get("f170")),
     volume=plain_number(data.get("f47")),
     turnover=plain_number(data.get("f48")),
     quote_date=quote_date(data.get("f86")),
@@ -178,7 +202,7 @@ def stock_payload(stock: dict[str, Any]) -> dict[str, Any]:
     "open": stock.get("open"),
     "previous_close": stock.get("previous_close"),
     "change_amount": stock.get("change_amount"),
-    "change_percent": stock.get("change_percent"),
+    "change_percent": normalize_percent_value(stock.get("change_percent")),
     "volume": stock.get("volume"),
     "turnover": stock.get("turnover"),
     "quote_date": stock.get("quote_date"),
@@ -209,19 +233,20 @@ def refresh_stocks(stocks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
 
 
 def load_settings() -> dict[str, Any]:
-  settings = {"minPrice": 0, "maxPrice": 70, "pickTime": "14:35", "lot": 1}
+  settings = {"minPrice": 0, "maxPrice": 70, "pickTime": "14:30", "lot": 1}
   try:
     rows = supabase(f"{SETTINGS_TABLE}?select=value&key=eq.{SETTINGS_ROW_KEY}&limit=1")
   except Exception:
     return settings
   if isinstance(rows, list) and rows and isinstance(rows[0].get("value"), dict):
     settings.update(rows[0]["value"])
+  settings["pickTime"] = "14:30"
   return settings
 
 
 def score_stock(stock: dict[str, Any], settings: dict[str, Any]) -> float:
   price = plain_number(stock.get("price"))
-  change = stock.get("change_percent")
+  change = normalize_percent_value(stock.get("change_percent"))
   high = plain_number(stock.get("high"))
   low = plain_number(stock.get("low"))
   turnover = plain_number(stock.get("turnover"))
@@ -279,10 +304,10 @@ def money(value: Any) -> str:
 
 
 def percent(value: Any) -> str:
-  try:
-    return f"{float(value):.2f}%"
-  except (TypeError, ValueError):
+  number = normalize_percent_value(value)
+  if number is None:
     return "-"
+  return f"{number:.2f}%"
 
 
 def build_result(stocks: list[dict[str, Any]], settings: dict[str, Any], errors: list[str]) -> dict[str, Any]:

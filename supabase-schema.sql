@@ -132,5 +132,6 @@ for each row
 execute function public.set_updated_at();
 
 insert into public.picker_settings (key, value)
-values ('default', '{"minPrice":0,"maxPrice":70,"pickTime":"14:35","lot":1}'::jsonb)
-on conflict (key) do nothing;
+values ('default', '{"minPrice":0,"maxPrice":70,"pickTime":"14:30","lot":1}'::jsonb)
+on conflict (key) do update
+set value = public.picker_settings.value || '{"pickTime":"14:30"}'::jsonb;
