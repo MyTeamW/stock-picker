@@ -5,6 +5,7 @@ const SUPABASE_URL = "https://kawztespuaiztftoifdk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Ydf2JJK06d4GMTE2awOSwg_3GZLTR27";
 const STOCK_TABLE = "picker_stocks";
 const SETTINGS_TABLE = "picker_settings";
+const RESULT_TABLE = "picker_results";
 const SETTINGS_ROW_KEY = "default";
 
 const DEFAULT_SETTINGS = {
@@ -22,6 +23,7 @@ const state = {
   query: "",
   editingCode: "",
   lastPick: null,
+  automationResult: null,
   remoteReady: false,
 };
 
@@ -122,6 +124,21 @@ function setStatus(text) {
   els.status.textContent = text;
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderTextList(title, values) {
+  const items = Array.isArray(values) ? values.filter(Boolean) : [];
+  if (items.length === 0) return "";
+  return `<div class="result-line"><strong>${escapeHtml(title)}：</strong>${items.map(escapeHtml).join("；")}</div>`;
+}
+
 function loadLocalState() {
   try {
     state.stocks = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
@@ -178,21 +195,32 @@ async function supabaseRequest(path, options = {}) {
 
 function fromDb(row) {
   const asNumber = (value) => (value === null || value === undefined ? null : Number(value));
+  const closePrice = asNumber(row.close_price ?? row.price);
+  const startPrice = asNumber(row.start_price);
+  const highPrice = asNumber(row.high_price ?? row.high);
+  const changeAmount =
+    Number.isFinite(closePrice) && Number.isFinite(startPrice) ? closePrice - startPrice : asNumber(row.change_amount);
+  const changePercent =
+    Number.isFinite(closePrice) && Number.isFinite(startPrice) && startPrice > 0
+      ? ((closePrice - startPrice) / startPrice) * 100
+      : asNumber(row.change_percent);
   return {
     code: row.code,
     name: row.name || row.code,
     remark: row.remark || "",
     business: row.business || "",
-    price: asNumber(row.price),
-    high: asNumber(row.high),
+    startDate: row.start_date || "",
+    startPrice,
+    price: closePrice,
+    high: highPrice,
     low: asNumber(row.low),
     open: asNumber(row.open),
     previousClose: asNumber(row.previous_close),
-    changeAmount: asNumber(row.change_amount),
-    changePercent: asNumber(row.change_percent),
+    changeAmount,
+    changePercent,
     volume: asNumber(row.volume),
     turnover: asNumber(row.turnover),
-    updatedAt: row.quote_date || "",
+    updatedAt: row.last_quote_date || row.quote_date || "",
     refreshedAt: row.refreshed_at || "",
     createdAt: row.created_at || "",
     deleted: Boolean(row.deleted),
@@ -220,18 +248,33 @@ function toDb(stock) {
   };
 }
 
+function fromResultDb(row) {
+  return {
+    active: row.active !== false,
+    generatedAt: row.generated_at || row.created_at || "",
+    title: row.title || "自动化选股结果",
+    summary: row.summary || "",
+    rationale: Array.isArray(row.rationale) ? row.rationale : [],
+    risks: Array.isArray(row.risks) ? row.risks : [],
+    action: row.action || "",
+    prompt: row.prompt || "",
+  };
+}
+
 async function loadRemoteState() {
   const cachedStocks = [...state.stocks];
   const cachedSettings = { ...state.settings };
-  const [stocks, settingsRows] = await Promise.all([
-    supabaseRequest(`${STOCK_TABLE}?select=*&deleted=eq.false&order=created_at.desc,code.asc`),
-    supabaseRequest(`${SETTINGS_TABLE}?select=value&key=eq.${SETTINGS_ROW_KEY}&limit=1`),
-  ]);
+  const stocks = await supabaseRequest(`${STOCK_TABLE}?select=*&deleted=eq.false&order=created_at.desc,code.asc`);
 
   state.stocks = Array.isArray(stocks) && stocks.length > 0 ? stocks.map(fromDb) : cachedStocks;
-  if (Array.isArray(settingsRows) && settingsRows[0] && settingsRows[0].value) {
-    state.settings = { ...DEFAULT_SETTINGS, ...settingsRows[0].value, pickTime: DEFAULT_SETTINGS.pickTime };
-  } else {
+  try {
+    const settingsRows = await supabaseRequest(`${SETTINGS_TABLE}?select=value&key=eq.${SETTINGS_ROW_KEY}&limit=1`);
+    if (Array.isArray(settingsRows) && settingsRows[0] && settingsRows[0].value) {
+      state.settings = { ...DEFAULT_SETTINGS, ...settingsRows[0].value, pickTime: DEFAULT_SETTINGS.pickTime };
+    } else {
+      state.settings = cachedSettings;
+    }
+  } catch {
     state.settings = cachedSettings;
   }
   saveStocks();
@@ -304,11 +347,9 @@ async function upsertRemoteSettings() {
           lot: state.settings.lot,
         },
       }),
-    });
+  });
     return true;
   } catch {
-    state.remoteReady = false;
-    setStatus("在线设置保存失败，已保存在本地缓存");
     return false;
   }
 }
@@ -503,6 +544,22 @@ function renderSummary() {
 }
 
 function renderPickResult() {
+  if (state.automationResult) {
+    const result = state.automationResult;
+    const title = result.title || "自动化选股结果";
+    const summary = result.summary || "";
+    const generatedAt = result.generatedAt ? ` <span class="muted">生成时间：${escapeHtml(result.generatedAt)}</span>` : "";
+    els.pickResult.innerHTML = `
+      <div><strong>${escapeHtml(title)}</strong>${generatedAt}</div>
+      ${summary ? `<div class="result-line">${escapeHtml(summary)}</div>` : ""}
+      ${renderTextList("依据", result.rationale)}
+      ${renderTextList("风险", result.risks)}
+      ${result.action ? `<div class="result-line"><strong>处理：</strong>${escapeHtml(result.action)}</div>` : ""}
+    `;
+    els.promptOutput.value = result.prompt || "";
+    return;
+  }
+
   if (!state.lastPick) {
     els.pickResult.textContent = EMPTY_PICK_TEXT;
     els.promptOutput.value = "";
@@ -553,6 +610,20 @@ function render() {
   }
 
   renderPickResult();
+}
+
+async function loadAutomationResult() {
+  try {
+    const rows = await supabaseRequest(`${RESULT_TABLE}?select=*&active=eq.true&order=generated_at.desc&limit=1`);
+    if (Array.isArray(rows) && rows[0]) {
+      state.automationResult = fromResultDb(rows[0]);
+      renderPickResult();
+      setStatus("已加载自动化选股结果");
+      return;
+    }
+  } catch {
+    setStatus("自动化结果表未就绪");
+  }
 }
 
 function clearForm() {
@@ -785,6 +856,7 @@ fillSettingsForm();
 updateClock();
 render();
 initRemoteState();
+loadAutomationResult();
 window.setInterval(updateClock, 1000);
 window.setInterval(maybeAutoPick, 30000);
 maybeAutoPick();

@@ -28,8 +28,29 @@ create table if not exists public.picker_settings (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.picker_results (
+  trade_date date primary key,
+  generated_at timestamptz not null default now(),
+  title text not null,
+  summary text not null,
+  rationale jsonb not null default '[]'::jsonb,
+  risks jsonb not null default '[]'::jsonb,
+  action text default '',
+  prompt text default '',
+  candidate_code text,
+  candidate_name text,
+  source_count integer not null default 0,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists picker_results_active_idx
+on public.picker_results (active, generated_at desc);
+
 alter table public.picker_stocks enable row level security;
 alter table public.picker_settings enable row level security;
+alter table public.picker_results enable row level security;
 
 drop policy if exists "public read picker stocks" on public.picker_stocks;
 drop policy if exists "public insert picker stocks" on public.picker_stocks;
@@ -65,6 +86,23 @@ on public.picker_settings for update
 using (true)
 with check (true);
 
+drop policy if exists "public read picker results" on public.picker_results;
+drop policy if exists "public insert picker results" on public.picker_results;
+drop policy if exists "public update picker results" on public.picker_results;
+
+create policy "public read picker results"
+on public.picker_results for select
+using (true);
+
+create policy "public insert picker results"
+on public.picker_results for insert
+with check (true);
+
+create policy "public update picker results"
+on public.picker_results for update
+using (true)
+with check (true);
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -84,6 +122,12 @@ execute function public.set_updated_at();
 drop trigger if exists picker_settings_set_updated_at on public.picker_settings;
 create trigger picker_settings_set_updated_at
 before update on public.picker_settings
+for each row
+execute function public.set_updated_at();
+
+drop trigger if exists picker_results_set_updated_at on public.picker_results;
+create trigger picker_results_set_updated_at
+before update on public.picker_results
 for each row
 execute function public.set_updated_at();
 

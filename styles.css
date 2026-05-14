@@ -271,6 +271,10 @@ textarea:focus {
   color: var(--accent-strong);
 }
 
+.result-line {
+  margin-top: 8px;
+}
+
 .prompt-box textarea {
   min-height: 134px;
   line-height: 1.55;

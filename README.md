@@ -19,4 +19,13 @@
 
 ## Supabase
 
-先在 Supabase SQL Editor 运行 `supabase-schema.sql`。表建好后，网页会自动连接 `picker_stocks` 和 `picker_settings`，实现多设备共享。
+先在 Supabase SQL Editor 运行 `supabase-schema.sql`。表建好后，网页会只连接本项目自己的 `picker_stocks`、`picker_settings` 和 `picker_results`，不再读取 tracker 的 `stocks` 表。
+
+## 自动化
+
+`scripts/run_picker_automation.py` 会读取 `picker_stocks`，刷新行情，按价格区间、涨跌幅、日内位置、成交额和风险标记打分，再把当天结果写入 `picker_results`。网页打开时会读取最新 `picker_results` 并显示在“选股结果”里，不需要每天提交 GitHub Pages 静态文件。
+
+GitHub Actions 工作流 `.github/workflows/picker-automation.yml` 默认在工作日 14:30（Asia/Shanghai）运行。仓库需要配置：
+
+- `PICKER_SUPABASE_URL`
+- `PICKER_SUPABASE_KEY`
