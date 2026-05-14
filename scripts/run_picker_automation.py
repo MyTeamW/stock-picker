@@ -6,6 +6,7 @@ import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from http.client import RemoteDisconnected
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -85,11 +86,22 @@ def quote_date(raw: Any) -> str:
 
 def request_json(url: str, *, method: str = "GET", body: Any = None, headers: dict[str, str] | None = None) -> Any:
   payload = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
-  request = Request(url, data=payload, method=method, headers=headers or {})
+  request_headers = {
+    "User-Agent": "Mozilla/5.0 StockPickerAutomation/1.0",
+    "Accept": "application/json,text/plain,*/*",
+  }
+  if "eastmoney.com" in url:
+    request_headers["Referer"] = "https://quote.eastmoney.com/"
+  if headers:
+    request_headers.update(headers)
+  request = Request(url, data=payload, method=method, headers=request_headers)
   with urlopen(request, timeout=15) as response:
     if response.status == 204:
       return None
-    return json.loads(response.read().decode("utf-8"))
+    text = response.read().decode("utf-8")
+    if not text.strip():
+      return None
+    return json.loads(text)
 
 
 def supabase_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
@@ -190,7 +202,7 @@ def refresh_stocks(stocks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
         prefer="resolution=merge-duplicates,return=minimal",
       )
       time.sleep(0.12)
-    except (HTTPError, URLError, TimeoutError, RuntimeError, ValueError) as exc:
+    except (HTTPError, URLError, TimeoutError, RemoteDisconnected, RuntimeError, ValueError) as exc:
       errors.append(f"{code}: {exc}")
       refreshed.append(stock)
   return refreshed, errors
