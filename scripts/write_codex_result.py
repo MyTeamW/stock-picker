@@ -37,6 +37,13 @@ def text_list(value: Any) -> list[str]:
   return []
 
 
+def first_dict(*values: Any) -> dict[str, Any]:
+  for value in values:
+    if isinstance(value, dict):
+      return value
+  return {}
+
+
 def optional_code(value: Any) -> str | None:
   clean = "".join(char for char in str(value or "") if char.isdigit())[:6]
   return clean if len(clean) == 6 else None
@@ -59,13 +66,21 @@ def integer(value: Any, fallback: int = 0) -> int:
     return fallback
 
 
-def normalize(payload: dict[str, Any]) -> dict[str, Any]:
-  candidate = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
-  title = text(payload.get("title"))
-  summary = text(payload.get("summary"))
-  rationale = text_list(payload.get("rationale"))
-  risks = text_list(payload.get("risks"))
-  action = text(payload.get("action"))
+def normalize_buy_recommendation(payload: dict[str, Any]) -> dict[str, Any]:
+  candidate = first_dict(payload.get("candidate"))
+  buy = first_dict(payload.get("buy_recommendation"), payload.get("buyRecommendation"))
+  title = text(buy.get("title") or payload.get("title"))
+  summary = text(buy.get("summary") or payload.get("summary"))
+  rationale = text_list(buy.get("rationale") or buy.get("reasons") or payload.get("rationale"))
+  risks = text_list(buy.get("risks") or payload.get("risks"))
+  action = text(buy.get("action") or payload.get("action"))
+  candidate_code = optional_code(
+    buy.get("candidate_code") or buy.get("candidateCode") or payload.get("candidate_code") or candidate.get("code")
+  )
+  candidate_name = text(
+    buy.get("candidate_name") or buy.get("candidateName") or payload.get("candidate_name") or candidate.get("name")
+  )
+
   if not title:
     raise ValueError("title is required")
   if not summary:
@@ -78,16 +93,68 @@ def normalize(payload: dict[str, Any]) -> dict[str, Any]:
     raise ValueError("action is required")
 
   return {
-    "trade_date": text(payload.get("trade_date")) or now_china().date().isoformat(),
-    "generated_at": text(payload.get("generated_at")) or now_china().isoformat(),
     "title": title,
     "summary": summary,
+    "candidate_code": candidate_code,
+    "candidate_name": candidate_name or None,
     "rationale": rationale,
     "risks": risks,
     "action": action,
-    "prompt": text(payload.get("prompt")),
-    "candidate_code": optional_code(payload.get("candidate_code") or candidate.get("code")),
-    "candidate_name": text(payload.get("candidate_name") or candidate.get("name")) or None,
+  }
+
+
+def normalize_holding_advice(payload: dict[str, Any]) -> list[dict[str, Any]]:
+  raw = payload.get("holding_advice", payload.get("holdingAdvice"))
+  if isinstance(raw, dict) and isinstance(raw.get("items"), list):
+    raw = raw["items"]
+  if not isinstance(raw, list):
+    return []
+
+  advice: list[dict[str, Any]] = []
+  for item in raw:
+    if not isinstance(item, dict):
+      continue
+    normalized = {
+      "code": optional_code(item.get("code") or item.get("candidate_code")),
+      "name": text(item.get("name") or item.get("candidate_name")) or None,
+      "base_position": text(item.get("base_position") or item.get("basePosition") or item.get("position")),
+      "summary": text(item.get("summary")),
+      "action": text(item.get("action")),
+      "rationale": text_list(item.get("rationale") or item.get("reasons")),
+      "risks": text_list(item.get("risks")),
+    }
+    if any(normalized.get(key) for key in ("code", "name", "summary", "action")):
+      advice.append(normalized)
+  return advice
+
+
+def normalize(payload: dict[str, Any]) -> dict[str, Any]:
+  buy = normalize_buy_recommendation(payload)
+  holding_advice = normalize_holding_advice(payload)
+  has_structured = "buy_recommendation" in payload or "buyRecommendation" in payload or "holding_advice" in payload or "holdingAdvice" in payload
+  prompt = text(payload.get("prompt"))
+  if has_structured:
+    prompt = json.dumps(
+      {
+        "version": 2,
+        "buy_recommendation": buy,
+        "holding_advice": holding_advice,
+      },
+      ensure_ascii=False,
+      separators=(",", ":"),
+    )
+
+  return {
+    "trade_date": text(payload.get("trade_date")) or now_china().date().isoformat(),
+    "generated_at": text(payload.get("generated_at")) or now_china().isoformat(),
+    "title": buy["title"],
+    "summary": buy["summary"],
+    "rationale": buy["rationale"],
+    "risks": buy["risks"],
+    "action": buy["action"],
+    "prompt": prompt,
+    "candidate_code": buy["candidate_code"],
+    "candidate_name": buy["candidate_name"],
     "source_count": integer(payload.get("source_count"), 0),
     "active": boolean(payload.get("active"), True),
   }

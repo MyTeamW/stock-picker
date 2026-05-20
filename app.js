@@ -3,6 +3,8 @@ const SETTINGS_KEY = "myteamw-stock-picker-settings-v1";
 const SUPABASE_URL = "https://kawztespuaiztftoifdk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Ydf2JJK06d4GMTE2awOSwg_3GZLTR27";
 const STOCK_TABLE = "picker_stocks";
+const TRACKER_TABLE = "stocks";
+const TRACKER_URL = "https://myteamw.github.io/tracker/";
 const SETTINGS_TABLE = "picker_settings";
 const RESULT_TABLE = "picker_results";
 const SETTINGS_ROW_KEY = "default";
@@ -17,10 +19,12 @@ const DEFAULT_SETTINGS = {
   basePositions: {},
 };
 
-const EMPTY_PICK_TEXT = "暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示。";
+const EMPTY_BUY_TEXT = "暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示。";
+const EMPTY_HOLDING_TEXT = "暂无持仓操作建议。填写底仓情况后，下一次自动化会生成对应建议。";
 
 const state = {
   stocks: [],
+  bigPool: [],
   settings: { ...DEFAULT_SETTINGS },
   editingCode: "",
   automationResult: null,
@@ -44,7 +48,9 @@ const els = {
   maxPrice: document.querySelector("#maxPriceInput"),
   lot: document.querySelector("#lotInput"),
   settingSummary: document.querySelector("#settingSummary"),
-  pickResult: document.querySelector("#pickResult"),
+  holdingCount: document.querySelector("#holdingCount"),
+  buyPickResult: document.querySelector("#buyPickResult"),
+  holdingAdviceResult: document.querySelector("#holdingAdviceResult"),
   defaultPrompt: document.querySelector("#defaultPromptOutput"),
   userRequirements: document.querySelector("#userRequirementsInput"),
   refreshDefaultPrompt: document.querySelector("#refreshDefaultPromptButton"),
@@ -97,6 +103,11 @@ function percent(value) {
   return Number.isFinite(num) ? `${num.toFixed(2)}%` : "-";
 }
 
+function directPercent(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? `${num.toFixed(2)}%` : "-";
+}
+
 function normalizePercentValue(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return null;
@@ -114,6 +125,13 @@ function compactMoney(value) {
 function numberOrNull(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num : null;
+}
+
+function ratioPercent(current, base) {
+  const currentNum = Number(current);
+  const baseNum = Number(base);
+  if (!Number.isFinite(currentNum) || !Number.isFinite(baseNum) || baseNum <= 0) return null;
+  return ((currentNum - baseNum) / baseNum) * 100;
 }
 
 function usefulStockName(name, code) {
@@ -292,6 +310,39 @@ function fromDb(row) {
   };
 }
 
+function fromTrackerDb(row) {
+  const asNumber = (value) => (value === null || value === undefined ? null : Number(value));
+  const code = normalizeCode(row.code);
+  const startPrice = asNumber(row.start_price);
+  const highPrice = asNumber(row.high_price ?? row.high);
+  const closePrice = asNumber(row.close_price ?? row.price);
+  const latestPrice = asNumber(row.price ?? row.close_price);
+  const latestHigh = asNumber(row.high ?? row.high_price);
+  return {
+    code,
+    name: usefulStockName(row.name, code) || code,
+    remark: row.remark || "",
+    recommender: row.recommender || "",
+    startDate: row.start_date || "",
+    startPrice,
+    closePrice,
+    highPrice,
+    price: latestPrice,
+    high: latestHigh,
+    low: asNumber(row.low),
+    open: asNumber(row.open),
+    previousClose: asNumber(row.previous_close),
+    changePercent: normalizePercentValue(row.change_percent),
+    turnover: asNumber(row.turnover),
+    increasePercent: ratioPercent(highPrice, startPrice),
+    highDrawdownPercent: ratioPercent(latestPrice || closePrice, highPrice),
+    startDrawdownPercent: ratioPercent(latestPrice || closePrice, startPrice),
+    updatedAt: normalizeDateText(row.last_quote_date || row.quote_date, row.refreshed_at),
+    createdAt: row.created_at || "",
+    deleted: Boolean(row.deleted),
+  };
+}
+
 function toDb(stock) {
   return {
     code: stock.code,
@@ -313,16 +364,72 @@ function toDb(stock) {
   };
 }
 
-function fromResultDb(row) {
+function textList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || "").trim()).filter(Boolean);
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  return [];
+}
+
+function parseStructuredResult(prompt) {
+  if (!prompt || typeof prompt !== "string") return null;
+  try {
+    const parsed = JSON.parse(prompt);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function normalizeResultSection(section = {}, fallback = {}) {
+  const source = section && typeof section === "object" ? section : {};
   return {
-    active: row.active !== false,
-    generatedAt: row.generated_at || row.created_at || "",
+    title: source.title || fallback.title || "自动化分析结果",
+    summary: source.summary || fallback.summary || "",
+    rationale: textList(source.rationale || source.reasons || fallback.rationale),
+    risks: textList(source.risks || fallback.risks),
+    action: source.action || fallback.action || "",
+    candidateCode: normalizeCode(source.candidate_code || source.candidateCode || fallback.candidateCode || ""),
+    candidateName: source.candidate_name || source.candidateName || fallback.candidateName || "",
+  };
+}
+
+function normalizeHoldingAdvice(value) {
+  const rows = Array.isArray(value) ? value : value && Array.isArray(value.items) ? value.items : [];
+  return rows
+    .filter((item) => item && typeof item === "object")
+    .map((item) => ({
+      code: normalizeCode(item.code || item.candidate_code || ""),
+      name: item.name || item.candidate_name || "",
+      basePosition: item.base_position || item.basePosition || item.position || "",
+      summary: item.summary || "",
+      action: item.action || "",
+      rationale: textList(item.rationale || item.reasons),
+      risks: textList(item.risks),
+    }))
+    .filter((item) => item.code || item.name || item.summary || item.action);
+}
+
+function fromResultDb(row) {
+  const flat = {
     title: row.title || "自动化选股结果",
     summary: row.summary || "",
     rationale: Array.isArray(row.rationale) ? row.rationale : [],
     risks: Array.isArray(row.risks) ? row.risks : [],
     action: row.action || "",
+    candidateCode: row.candidate_code || "",
+    candidateName: row.candidate_name || "",
+  };
+  const structured = parseStructuredResult(row.prompt || "");
+  const buySource = structured && (structured.buy_recommendation || structured.buyRecommendation);
+  const holdingSource = structured && (structured.holding_advice || structured.holdingAdvice);
+  return {
+    active: row.active !== false,
+    generatedAt: row.generated_at || row.created_at || "",
+    ...flat,
     prompt: row.prompt || "",
+    buyRecommendation: normalizeResultSection(buySource || flat, flat),
+    holdingAdvice: normalizeHoldingAdvice(holdingSource),
   };
 }
 
@@ -332,6 +439,12 @@ async function loadRemoteState() {
   const stocks = await supabaseRequest(`${STOCK_TABLE}?select=*&deleted=eq.false&order=created_at.desc,code.asc`);
 
   state.stocks = Array.isArray(stocks) && stocks.length > 0 ? stocks.map(fromDb) : cachedStocks;
+  try {
+    const bigPool = await supabaseRequest(`${TRACKER_TABLE}?select=*&deleted=eq.false&order=created_at.desc,code.asc`);
+    state.bigPool = Array.isArray(bigPool) ? bigPool.map(fromTrackerDb).filter((stock) => stock.code) : [];
+  } catch {
+    state.bigPool = [];
+  }
   try {
     const settingsRows = await supabaseRequest(`${SETTINGS_TABLE}?select=value&key=eq.${SETTINGS_ROW_KEY}&limit=1`);
     if (Array.isArray(settingsRows) && settingsRows[0] && settingsRows[0].value) {
@@ -600,6 +713,10 @@ function filteredStocks() {
   return state.stocks;
 }
 
+function holdingStocks() {
+  return state.stocks.filter((stock) => basePositionFor(stock.code) || stock.basePosition);
+}
+
 function setTrend(cell, value) {
   cell.textContent = percent(value);
   cell.classList.toggle("positive", Number(value) > 0);
@@ -608,8 +725,14 @@ function setTrend(cell, value) {
 
 function renderSummary() {
   const eligible = state.stocks.filter(priceFits).length;
+  const holdingCount = holdingStocks().length;
   const lotShares = Number(state.settings.lot) * 100;
-  els.settingSummary.textContent = `价格区间：${money(state.settings.minPrice)} - ${money(state.settings.maxPrice)} 元；默认时间：${DEFAULT_SETTINGS.pickTime}；买入量：${state.settings.lot} 手（${lotShares} 股）；符合区间：${eligible} 只`;
+  els.settingSummary.textContent = `大池：${state.bigPool.length} 只；持仓：${holdingCount} 只；价格区间：${money(
+    state.settings.minPrice,
+  )} - ${money(state.settings.maxPrice)} 元；默认时间：${DEFAULT_SETTINGS.pickTime}；买入量：${
+    state.settings.lot
+  } 手（${lotShares} 股）；持仓池符合区间：${eligible} 只`;
+  if (els.holdingCount) els.holdingCount.textContent = `持仓 ${holdingCount} 只`;
 }
 
 function buildCandidateLine(stock, index) {
@@ -623,23 +746,86 @@ function buildCandidateLine(stock, index) {
   )}，底仓情况：${basePosition}，备注：${remark}`;
 }
 
+function buildBigPoolLine(stock, index) {
+  const displayIndex = Number(index) + 1;
+  const remark = stock.remark || stock.recommender || "无";
+  return `${displayIndex}. ${displayStockName(stock)}（${stock.code}）：最新价 ${money(stock.price || stock.closePrice)} 元，起始价 ${money(
+    stock.startPrice,
+  )} 元，最高价 ${money(stock.highPrice || stock.high)} 元，最高涨幅 ${directPercent(
+    stock.increasePercent,
+  )}，高位回撤 ${directPercent(stock.highDrawdownPercent)}，今日涨跌幅 ${percent(
+    stock.changePercent,
+  )}，更新时间 ${stock.updatedAt || "-"}，备注：${remark}`;
+}
+
+function scoreBigPoolStock(stock) {
+  const price = Number(stock.price || stock.closePrice);
+  if (!Number.isFinite(price) || price <= 0) return -999;
+  if (price < Number(state.settings.minPrice) || price > Number(state.settings.maxPrice)) return -999;
+  if (/ST|退/u.test(String(stock.name || ""))) return -999;
+
+  let score = 0;
+  score += price >= 6 && price <= 60 ? 18 : 8;
+  const dailyChange = normalizePercentValue(stock.changePercent);
+  if (Number.isFinite(dailyChange)) {
+    if (dailyChange >= -1.5 && dailyChange <= 4.5) score += 26;
+    else if (dailyChange > 4.5 && dailyChange <= 7.5) score += 17;
+    else if (dailyChange >= -4 && dailyChange < -1.5) score += 12;
+    else score += 4;
+  }
+
+  const drawdown = Number(stock.highDrawdownPercent);
+  if (Number.isFinite(drawdown)) {
+    if (drawdown >= -16 && drawdown <= -2) score += 22;
+    else if (drawdown > -2 && drawdown <= 3) score += 14;
+    else if (drawdown >= -28 && drawdown < -16) score += 8;
+  }
+
+  const startGain = Number(stock.startDrawdownPercent);
+  if (Number.isFinite(startGain)) {
+    if (startGain >= 0 && startGain <= 45) score += 16;
+    else if (startGain > 45 && startGain <= 90) score += 9;
+    else if (startGain < 0 && startGain >= -12) score += 6;
+  }
+
+  const turnover = Number(stock.turnover);
+  if (Number.isFinite(turnover)) {
+    if (turnover >= 500000000) score += 16;
+    else if (turnover >= 100000000) score += 10;
+    else if (turnover >= 30000000) score += 5;
+  }
+
+  const theme = `${stock.remark || ""} ${stock.recommender || ""}`;
+  if (/通信|电力|新能源|半导体|智能|光|电子|材料|算力|AI/u.test(theme)) score += 8;
+  if (/^(688|300|301)/.test(stock.code || "")) score -= 3;
+  return score;
+}
+
+function rankedBigPoolStocks() {
+  return state.bigPool
+    .map((stock) => ({ ...stock, score: scoreBigPoolStock(stock) }))
+    .sort((a, b) => b.score - a.score)
+    .filter((stock) => stock.score > 0);
+}
+
 function buildDefaultPrompt() {
-  const ranked = eligibleStocks();
-  const visibleStocks = ranked.length > 0 ? ranked : [...state.stocks];
-  const selectedStock = visibleStocks[0] || null;
-  const candidateText = visibleStocks.slice(0, 8).map(buildCandidateLine).join("\n") || "暂无可用股票。";
-  const selectedText = selectedStock ? `${displayStockName(selectedStock)}（${selectedStock.code}）` : "暂无";
+  const bigRanked = rankedBigPoolStocks();
+  const bigCandidates = (bigRanked.length > 0 ? bigRanked : state.bigPool).slice(0, 12);
+  const holdings = holdingStocks();
+  const bigCandidateText = bigCandidates.map(buildBigPoolLine).join("\n") || "暂无可用大池股票。";
+  const holdingText = holdings.map(buildCandidateLine).join("\n") || "暂无已填写底仓的持仓股票。";
   const lotShares = Number(state.settings.lot) * 100;
 
   return [
-    "请你作为谨慎的 A 股短线选股助手，只根据本页面股票池、底仓情况、备注和今日行情，推荐 1 只今日买入观察标的。",
-    "请综合价格区间、涨跌幅、日内高低点、开盘/昨收、底仓情况和备注判断，不要机械照搬页面本地预选。",
+    "请你作为谨慎的 A 股短线助手，今天要分开完成两个需求。",
+    `需求一：从大池子（${TRACKER_URL}）中只推荐 1 只今日买入观察标的；以交易日 14:30 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，但不要机械照搬页面排序。`,
+    "需求二：只对已经持仓的股票给后续操作建议；是否持仓以“底仓情况”非空为准，未填写底仓的股票不当作持仓处理。",
     `我的设置：价格区间 ${money(state.settings.minPrice)} - ${money(
       state.settings.maxPrice,
     )} 元；默认选股时间 ${DEFAULT_SETTINGS.pickTime}；计划买入 ${state.settings.lot} 手（${lotShares} 股）。`,
-    `页面本地预选候选：${selectedText}。这只是页面根据当前行情整理出的阅读顺序，不代表最终结论。`,
-    `股票池：\n${candidateText}`,
-    "请输出：推荐股票、推荐理由、需要回避的风险、买入量提醒、理想买点、止损位、短线目标区间，并明确不构成投资建议。",
+    `大池候选摘要：\n${bigCandidateText}`,
+    `已持仓股票：\n${holdingText}`,
+    "请输出两部分：一是今日新买推荐，必须包含推荐股票、推荐理由、风险、理想买点、止损位、短线目标区间和买入量提醒；二是每只持仓股的后续操作建议，明确持有、减仓、观察或止损条件。所有内容都要写明不构成投资建议。",
   ].join("\n\n");
 }
 
@@ -652,29 +838,72 @@ function renderPromptInputs() {
   els.userRequirements.value = state.settings.userRequirements || "";
 }
 
-function renderPickResult() {
+function renderResultBlock(container, section, emptyText) {
+  if (!section) {
+    container.textContent = emptyText;
+    return;
+  }
+  const title = section.title || "自动化分析结果";
+  const summary = section.summary || "";
+  const generatedAt =
+    state.automationResult && state.automationResult.generatedAt
+      ? ` <span class="muted">生成时间：${escapeHtml(state.automationResult.generatedAt)}</span>`
+      : "";
+  container.innerHTML = `
+    <div class="result-title"><strong>${escapeHtml(title)}</strong>${generatedAt}</div>
+    ${summary ? `<div class="result-line">${escapeHtml(summary)}</div>` : ""}
+    ${renderTextList("依据", section.rationale)}
+    ${renderTextList("风险", section.risks)}
+    ${
+      section.action
+        ? `<div class="result-line"><strong>短线操作：</strong><span class="result-emphasis">${escapeHtml(
+            section.action,
+          )}</span></div>`
+        : ""
+    }
+  `;
+}
+
+function renderBuyPickResult() {
   if (state.automationResult) {
-    const result = state.automationResult;
-    const title = result.title || "自动化选股结果";
-    const summary = result.summary || "";
-    const generatedAt = result.generatedAt ? ` <span class="muted">生成时间：${escapeHtml(result.generatedAt)}</span>` : "";
-    els.pickResult.innerHTML = `
-      <div class="result-title"><strong>${escapeHtml(title)}</strong>${generatedAt}</div>
-      ${summary ? `<div class="result-line">${escapeHtml(summary)}</div>` : ""}
-      ${renderTextList("依据", result.rationale)}
-      ${renderTextList("风险", result.risks)}
-      ${
-        result.action
-          ? `<div class="result-line"><strong>短线操作：</strong><span class="result-emphasis">${escapeHtml(
-              result.action,
-            )}</span></div>`
-          : ""
-      }
-    `;
+    renderResultBlock(els.buyPickResult, state.automationResult.buyRecommendation, EMPTY_BUY_TEXT);
     return;
   }
 
-  els.pickResult.textContent = EMPTY_PICK_TEXT;
+  els.buyPickResult.textContent = EMPTY_BUY_TEXT;
+}
+
+function renderHoldingAdvice() {
+  const advice = state.automationResult ? state.automationResult.holdingAdvice : [];
+  if (!advice || advice.length === 0) {
+    els.holdingAdviceResult.textContent = EMPTY_HOLDING_TEXT;
+    return;
+  }
+
+  els.holdingAdviceResult.innerHTML = `<div class="advice-list">${advice
+    .map((item) => {
+      const title = item.name || item.code ? `${item.name || item.code}${item.code ? `（${item.code}）` : ""}` : "持仓";
+      const basePosition = item.basePosition || basePositionFor(item.code) || "未填写";
+      return `
+        <article class="advice-item">
+          <div class="advice-head">
+            <strong>${escapeHtml(title)}</strong>
+            <span class="muted">底仓：${escapeHtml(basePosition)}</span>
+          </div>
+          ${item.summary ? `<div class="result-line">${escapeHtml(item.summary)}</div>` : ""}
+          ${
+            item.action
+              ? `<div class="result-line"><strong>后续操作：</strong><span class="result-emphasis">${escapeHtml(
+                  item.action,
+                )}</span></div>`
+              : ""
+          }
+          ${renderTextList("依据", item.rationale)}
+          ${renderTextList("风险", item.risks)}
+        </article>
+      `;
+    })
+    .join("")}</div>`;
 }
 
 function render() {
@@ -718,7 +947,8 @@ function render() {
     els.rows.appendChild(row);
   }
 
-  renderPickResult();
+  renderBuyPickResult();
+  renderHoldingAdvice();
 }
 
 async function loadAutomationResult() {
@@ -726,7 +956,8 @@ async function loadAutomationResult() {
     const rows = await supabaseRequest(`${RESULT_TABLE}?select=*&active=eq.true&order=generated_at.desc&limit=1`);
     if (Array.isArray(rows) && rows[0]) {
       state.automationResult = fromResultDb(rows[0]);
-      renderPickResult();
+      renderBuyPickResult();
+      renderHoldingAdvice();
       setStatus("已加载自动化选股结果");
       return;
     }

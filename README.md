@@ -7,8 +7,9 @@
 - 股票增删改查，优先同步到 Supabase 在线数据库，失败时保存在浏览器 localStorage。
 - 通过公开行情接口刷新股票现价、涨跌幅、日内高低、成交额等基础信息。
 - 设置价格区间，默认人民币 70 元以内。
+- 页面分成两块：上半部分从大池子 `https://myteamw.github.io/tracker/` 给出今日新买推荐；下半部分对已填写底仓的持仓股给出后续操作建议。
 - 维护每只股票的底仓情况，并把默认提示词和“我的要求”同步到 Supabase 设置。
-- Codex 定时自动化默认在交易日 14:30 分析并写入结果。
+- Codex 定时自动化默认在交易日 14:30 分析并写入两段结果。
 - 设置买入量，默认 1 手。
 - 无 OpenAI API 模式：网页不直接调用模型；Codex 定时对话负责综合默认提示词、我的要求和股票池行情后写回结果。
 
@@ -20,7 +21,7 @@
 
 ## Supabase
 
-先在 Supabase SQL Editor 运行 `supabase-schema.sql`。表建好后，网页会只连接本项目自己的 `picker_stocks`、`picker_settings` 和 `picker_results`，不再读取 tracker 的 `stocks` 表。
+先在 Supabase SQL Editor 运行 `supabase-schema.sql`。表建好后，网页会连接本项目自己的 `picker_stocks`、`picker_settings` 和 `picker_results`。今日新买推荐会只读大池子页面背后的 `stocks` 表，持仓建议仍以 `picker_stocks` 和 `picker_settings.basePositions` 为准。
 
 ## 自动化
 
@@ -28,8 +29,8 @@
 
 定时对话的流程见 `CODEX_AUTOMATION.md`：
 
-- `scripts/read_codex_context.py --refresh-quotes` 读取 `picker_stocks`、设置、默认提示词和“我的要求”，并先刷新默认提示词。
-- Codex 结合当天行情、默认提示词、我的要求和底仓情况自行分析，不直接照搬规则分数。
+- `scripts/read_codex_context.py --refresh-quotes` 读取大池 `stocks`、持仓 `picker_stocks`、设置、默认提示词和“我的要求”，并先刷新默认提示词。
+- Codex 结合当天行情、默认提示词、我的要求、大池数据和持仓底仓情况自行分析，不直接照搬规则分数。
 - `scripts/write_codex_result.py result.json` 把结果写入 `picker_results`。
 
-网页打开时会读取最新 `picker_results` 并显示在“选股结果”里，不需要每天提交 GitHub Pages 静态文件。
+网页打开时会读取最新 `picker_results`，分别显示“今日选股推荐”和“持仓操作建议”，不需要每天提交 GitHub Pages 静态文件。
