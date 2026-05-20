@@ -127,13 +127,6 @@ h3 {
   padding: 4px 2px 0;
 }
 
-.section-kicker {
-  margin: 0 0 7px;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 800;
-}
-
 .source-link,
 .section-count {
   display: inline-flex;
@@ -216,7 +209,6 @@ textarea:focus {
 
 .primary,
 .secondary,
-.edit,
 .delete,
 .link-button {
   display: inline-flex;
@@ -241,8 +233,7 @@ textarea:focus {
   background: var(--accent-strong);
 }
 
-.secondary,
-.edit {
+.secondary {
   border-color: var(--line);
   background: #fbfcfa;
   color: var(--ink);
@@ -254,7 +245,6 @@ textarea:focus {
   opacity: 0.72;
 }
 
-.edit,
 .delete {
   min-height: 32px;
   padding: 0 10px;
@@ -370,11 +360,19 @@ textarea:focus {
 }
 
 .base-position-input {
-  min-height: 40px;
+  min-height: 80px;
   resize: vertical;
   font-size: 13px;
   line-height: 1.35;
   text-align: left;
+}
+
+.base-position-summary {
+  margin-top: 6px;
+  color: var(--deep-red);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.35;
 }
 
 .table-wrap {
@@ -410,8 +408,8 @@ td {
 
 th:first-child,
 td:first-child,
-th:nth-child(6),
-td:nth-child(6) {
+th:nth-child(5),
+td:nth-child(5) {
   text-align: left;
 }
 
@@ -427,23 +425,18 @@ td:nth-child(4) {
 
 th:nth-child(5),
 td:nth-child(5) {
-  width: 170px;
+  width: 230px;
   text-align: left;
 }
 
 th:nth-child(6),
 td:nth-child(6) {
-  width: 190px;
-}
-
-th:nth-child(7),
-td:nth-child(7) {
   width: 110px;
 }
 
 th:last-child,
 td:last-child {
-  width: 118px;
+  width: 88px;
   text-align: center;
 }
 
@@ -530,7 +523,7 @@ td:last-child {
   }
 
   table {
-    min-width: 1040px;
+    min-width: 940px;
   }
 
   th:first-child,

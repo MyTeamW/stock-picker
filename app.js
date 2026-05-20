@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const EMPTY_BUY_TEXT = "暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示。";
-const EMPTY_HOLDING_TEXT = "暂无持仓操作建议。填写底仓情况后，下一次自动化会生成对应建议。";
+const EMPTY_HOLDING_TEXT = "暂无持仓操作建议。填写底仓明细后，下一次自动化会生成对应建议。";
 
 const state = {
   stocks: [],
@@ -165,6 +165,44 @@ function normalizeSettings(raw = {}) {
 
 function basePositionFor(code) {
   return String((state.settings.basePositions || {})[normalizeCode(code)] || "").trim();
+}
+
+function basePositionEntries(value) {
+  return String(value || "")
+    .split(/\n|；|;/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const lotMatch = line.match(/(\d+(?:\.\d+)?)\s*手/u);
+      const numbers = [...line.matchAll(/\d+(?:\.\d+)?/gu)].map((match) => ({
+        value: Number(match[0]),
+        index: match.index || 0,
+      }));
+      if (!lotMatch || numbers.length < 2) return null;
+      const lotIndex = lotMatch.index || 0;
+      const lots = Number(lotMatch[1]);
+      const priceItem = numbers.find((item) => Math.abs(item.index - lotIndex) > 2 && item.value > 0);
+      if (!Number.isFinite(lots) || lots <= 0 || !priceItem) return null;
+      return { price: priceItem.value, lots };
+    })
+    .filter(Boolean);
+}
+
+function basePositionSummary(value) {
+  const entries = basePositionEntries(value);
+  if (entries.length === 0) return "";
+  const totalLots = entries.reduce((sum, item) => sum + item.lots, 0);
+  const totalCost = entries.reduce((sum, item) => sum + item.price * item.lots, 0);
+  if (!Number.isFinite(totalLots) || totalLots <= 0) return "";
+  return `合计 ${totalLots.toFixed(totalLots % 1 === 0 ? 0 : 2)} 手，均价 ${money(totalCost / totalLots)}`;
+}
+
+function formatBasePosition(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const inline = text.replace(/\s*\n+\s*/g, "；");
+  const summary = basePositionSummary(text);
+  return summary ? `${inline}（${summary}）` : inline;
 }
 
 function attachBasePositions(stocks) {
@@ -737,13 +775,13 @@ function renderSummary() {
 
 function buildCandidateLine(stock, index) {
   const displayIndex = Number(index) + 1;
-  const basePosition = stock.basePosition || basePositionFor(stock.code) || "未填写";
+  const basePosition = formatBasePosition(stock.basePosition || basePositionFor(stock.code)) || "未填写";
   const remark = stock.remark || stock.business || "无";
   return `${displayIndex}. ${displayStockName(stock)}（${stock.code}）：现价 ${money(stock.price)} 元，涨跌幅 ${percent(
     stock.changePercent,
   )}，今高/今低 ${money(stock.high)}/${money(stock.low)}，开盘/昨收 ${money(stock.open)}/${money(
     stock.previousClose,
-  )}，底仓情况：${basePosition}，备注：${remark}`;
+  )}，底仓明细：${basePosition}，备注：${remark}`;
 }
 
 function buildBigPoolLine(stock, index) {
@@ -817,15 +855,15 @@ function buildDefaultPrompt() {
   const lotShares = Number(state.settings.lot) * 100;
 
   return [
-    "请你作为谨慎的 A 股短线助手，今天要分开完成两个需求。",
-    `需求一：从大池子（${TRACKER_URL}）中只推荐 1 只今日买入观察标的；以交易日 14:30 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，但不要机械照搬页面排序。`,
-    "需求二：只对已经持仓的股票给后续操作建议；是否持仓以“底仓情况”非空为准，未填写底仓的股票不当作持仓处理。",
+    "请你作为谨慎的 A 股短线助手，今天要分开完成两个部分。",
+    `今日选股推荐：从大池子（${TRACKER_URL}）中只推荐 1 只今日买入观察标的；以交易日 14:30 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，但不要机械照搬页面排序。`,
+    "持仓操作建议：只对已经持仓的股票给后续操作建议；是否持仓以“底仓明细”非空为准，未填写底仓明细的股票不当作持仓处理。",
     `我的设置：价格区间 ${money(state.settings.minPrice)} - ${money(
       state.settings.maxPrice,
     )} 元；默认选股时间 ${DEFAULT_SETTINGS.pickTime}；计划买入 ${state.settings.lot} 手（${lotShares} 股）。`,
     `大池候选摘要：\n${bigCandidateText}`,
     `已持仓股票：\n${holdingText}`,
-    "请输出两部分：一是今日新买推荐，必须包含推荐股票、推荐理由、风险、理想买点、止损位、短线目标区间和买入量提醒；二是每只持仓股的后续操作建议，明确持有、减仓、观察或止损条件。所有内容都要写明不构成投资建议。",
+    "请输出两部分：第一部分是今日新买推荐，必须包含推荐股票、推荐理由、风险、理想买点、止损位、短线目标区间和买入量提醒；第二部分是每只持仓股的后续操作建议，明确持有、减仓、观察或止损条件。所有内容都要写明不构成投资建议。",
   ].join("\n\n");
 }
 
@@ -883,12 +921,12 @@ function renderHoldingAdvice() {
   els.holdingAdviceResult.innerHTML = `<div class="advice-list">${advice
     .map((item) => {
       const title = item.name || item.code ? `${item.name || item.code}${item.code ? `（${item.code}）` : ""}` : "持仓";
-      const basePosition = item.basePosition || basePositionFor(item.code) || "未填写";
+      const basePosition = formatBasePosition(item.basePosition || basePositionFor(item.code)) || "未填写";
       return `
         <article class="advice-item">
           <div class="advice-head">
             <strong>${escapeHtml(title)}</strong>
-            <span class="muted">底仓：${escapeHtml(basePosition)}</span>
+            <span class="muted">底仓明细：${escapeHtml(basePosition)}</span>
           </div>
           ${item.summary ? `<div class="result-line">${escapeHtml(item.summary)}</div>` : ""}
           ${
@@ -933,16 +971,23 @@ function render() {
     setTrend(cells.change, stock.changePercent);
     cells.range.textContent = `${money(stock.high)} / ${money(stock.low)}`;
     const baseInput = document.createElement("textarea");
+    const baseSummary = document.createElement("div");
     baseInput.className = "base-position-input";
-    baseInput.rows = 2;
-    baseInput.placeholder = "无 / 1手 / 成本39.20";
+    baseSummary.className = "base-position-summary";
+    baseInput.rows = 4;
+    baseInput.placeholder = "63.00 / 1手\n65.00 / 1手";
     baseInput.value = stock.basePosition || basePositionFor(stock.code);
+    const updateBaseSummary = () => {
+      const summary = basePositionSummary(baseInput.value);
+      baseSummary.textContent = summary;
+      baseSummary.hidden = !summary;
+    };
+    baseInput.addEventListener("input", updateBaseSummary);
     baseInput.addEventListener("change", () => saveBasePosition(stock.code, baseInput.value));
-    cells.basePosition.appendChild(baseInput);
-    cells.remark.textContent = stock.remark || stock.business || "-";
+    updateBaseSummary();
+    cells.basePosition.append(baseInput, baseSummary);
     cells.updatedAt.textContent = stock.updatedAt || "-";
 
-    row.querySelector(".edit").addEventListener("click", () => editStock(stock.code));
     row.querySelector(".delete").addEventListener("click", () => deleteStock(stock.code));
     els.rows.appendChild(row);
   }
@@ -1197,7 +1242,7 @@ function saveBasePosition(code, value) {
   state.settings.defaultPrompt = buildDefaultPrompt();
   saveStocks();
   renderPromptInputs();
-  scheduleSettingsSync("底仓情况已保存");
+  scheduleSettingsSync("底仓明细已保存");
 }
 
 async function saveSettingsFromForm(event) {

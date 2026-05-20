@@ -107,6 +107,11 @@ def base_position_for(stock: dict[str, Any], settings: dict[str, Any]) -> str:
   return ""
 
 
+def format_base_position(value: Any) -> str:
+  text = str(value or "").strip()
+  return re.sub(r"\s*\n+\s*", "；", text)
+
+
 def normalize_stock(stock: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, Any]:
   settings = settings or {}
   quote_date = str(stock.get("quote_date") or "")
@@ -195,13 +200,13 @@ def is_valid_date(value: str) -> bool:
 
 
 def candidate_line(stock: dict[str, Any], index: int, settings: dict[str, Any]) -> str:
-  base_position = base_position_for(stock, settings) or "未填写"
+  base_position = format_base_position(base_position_for(stock, settings)) or "未填写"
   return (
     f"{index}. {useful_stock_name(stock.get('name'), stock.get('code'))}（{stock.get('code')}）："
     f"现价{money(stock.get('price'))}元，涨跌幅{percent(stock.get('change_percent'))}，"
     f"今高/今低{money(stock.get('high'))}/{money(stock.get('low'))}，"
     f"开盘/昨收{money(stock.get('open'))}/{money(stock.get('previous_close'))}，"
-    f"底仓情况：{base_position}，备注："
+    f"底仓明细：{base_position}，备注："
     f"{stock.get('remark') or stock.get('business') or '无'}"
   )
 
@@ -298,19 +303,19 @@ def build_default_prompt(
     holding_candidates = "暂无已填写底仓的持仓股票。"
 
   return (
-    "请你作为谨慎的 A 股短线助手，今天要分开完成两个需求。\n\n"
-    f"需求一：从大池子（{TRACKER_URL}）中只推荐 1 只今日买入观察标的；"
+    "请你作为谨慎的 A 股短线助手，今天要分开完成两个部分。\n\n"
+    f"今日选股推荐：从大池子（{TRACKER_URL}）中只推荐 1 只今日买入观察标的；"
     "以交易日 14:30 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，"
     "但不要机械照搬页面排序。\n\n"
-    "需求二：只对已经持仓的股票给后续操作建议；是否持仓以“底仓情况”非空为准，"
-    "未填写底仓的股票不当作持仓处理。\n\n"
+    "持仓操作建议：只对已经持仓的股票给后续操作建议；是否持仓以“底仓明细”非空为准，"
+    "未填写底仓明细的股票不当作持仓处理。\n\n"
     f"我的设置：价格区间 {money(settings.get('minPrice'))} - {money(settings.get('maxPrice'))} 元；"
     f"默认选股时间 {settings.get('pickTime') or '14:30'}；计划买入 {int(settings.get('lot') or 1)} 手"
     f"（{int(settings.get('lot') or 1) * 100} 股）。\n\n"
     f"大池候选摘要：\n{big_candidates}\n\n"
     f"已持仓股票：\n{holding_candidates}"
-    "\n\n请输出两部分：一是今日新买推荐，必须包含推荐股票、推荐理由、风险、理想买点、"
-    "止损位、短线目标区间和买入量提醒；二是每只持仓股的后续操作建议，明确持有、减仓、"
+    "\n\n请输出两部分：第一部分是今日新买推荐，必须包含推荐股票、推荐理由、风险、理想买点、"
+    "止损位、短线目标区间和买入量提醒；第二部分是每只持仓股的后续操作建议，明确持有、减仓、"
     "观察或止损条件。所有内容都要写明不构成投资建议。"
   )
 
@@ -334,16 +339,16 @@ def persist_default_prompt(settings: dict[str, Any], default_prompt: str) -> Non
 
 def build_writer_schema() -> dict[str, str]:
   return {
-    "title": "兼容字段，展示需求一标题，例如 今日大池推荐：某某（000000）",
-    "summary": "兼容字段，1-2 句概括需求一结论，需写明不构成投资建议",
-    "rationale": "兼容字段，字符串数组，列出需求一选择依据",
-    "risks": "兼容字段，字符串数组，列出需求一主要风险和放弃条件",
-    "action": "兼容字段，需求一短线操作建议，包含不追高、理想买点、止损、目标、买入量提醒",
+    "title": "兼容字段，展示今日选股推荐标题，例如 今日推荐：某某（000000）",
+    "summary": "兼容字段，1-2 句概括今日选股推荐结论，需写明不构成投资建议",
+    "rationale": "兼容字段，字符串数组，列出今日选股推荐选择依据",
+    "risks": "兼容字段，字符串数组，列出今日选股推荐主要风险和放弃条件",
+    "action": "兼容字段，今日选股推荐短线操作建议，包含不追高、理想买点、止损、目标、买入量提醒",
     "buy_recommendation": "必填对象，字段为 title、summary、candidate_code、candidate_name、rationale(数组)、risks(数组)、action；表示从大池子中推荐的 1 只今日买入观察标的",
-    "holding_advice": "必填数组；每项字段为 code、name、base_position、summary、action、rationale(数组)、risks(数组)；仅包含底仓情况非空的持仓股，没有持仓则为空数组",
+    "holding_advice": "必填数组；每项字段为 code、name、base_position、summary、action、rationale(数组)、risks(数组)；仅包含底仓明细非空的持仓股，没有持仓则为空数组",
     "prompt": "可选，通常留空；结构化结果会被写入 picker_results.prompt 供页面分区渲染",
-    "candidate_code": "可选，需求一 6 位股票代码；没有候选时为 null",
-    "candidate_name": "可选，需求一股票简称；没有候选时为 null",
+    "candidate_code": "可选，今日选股推荐 6 位股票代码；没有候选时为 null",
+    "candidate_name": "可选，今日选股推荐股票简称；没有候选时为 null",
     "source_count": "可选，本次读取的大池股票数量",
   }
 

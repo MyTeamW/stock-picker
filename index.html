@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>选股助手</title>
-    <link rel="stylesheet" href="./styles.css?v=20260520-2" />
+    <link rel="stylesheet" href="./styles.css?v=20260520-3" />
   </head>
   <body>
     <main class="shell">
@@ -26,15 +26,14 @@
       <section class="workflow-section" aria-labelledby="buySectionTitle">
         <div class="section-head">
           <div>
-            <p class="section-kicker">需求一</p>
-            <h2 id="buySectionTitle">大池今日选股推荐</h2>
+            <h2 id="buySectionTitle">今日选股推荐</h2>
           </div>
           <a class="source-link" href="https://myteamw.github.io/tracker/" target="_blank" rel="noopener noreferrer">
             大池子
           </a>
         </div>
 
-        <section class="assistant-panel" aria-label="大池今日选股推荐">
+        <section class="assistant-panel" aria-label="今日选股推荐">
           <div class="assistant-head">
             <div>
               <h3>AI 分析输入</h3>
@@ -45,7 +44,7 @@
           </div>
           <div class="prompt-stack">
             <label class="prompt-box">
-              <span>默认提示词（自动汇总两项需求）</span>
+              <span>默认提示词（自动汇总两部分）</span>
               <textarea id="defaultPromptOutput" rows="8" readonly></textarea>
             </label>
             <label class="prompt-box">
@@ -65,18 +64,10 @@
       <section class="workflow-section" aria-labelledby="holdingSectionTitle">
         <div class="section-head">
           <div>
-            <p class="section-kicker">需求二</p>
-            <h2 id="holdingSectionTitle">持仓后续操作建议</h2>
+            <h2 id="holdingSectionTitle">持仓操作建议</h2>
           </div>
           <span class="section-count" id="holdingCount">持仓 -- 只</span>
         </div>
-
-        <label class="result-box result-card">
-          <span>持仓操作建议</span>
-          <div id="holdingAdviceResult" class="pick-result advice-result">
-            暂无持仓操作建议。填写底仓情况后，下一次自动化会生成对应建议。
-          </div>
-        </label>
 
         <section class="controls" aria-label="持仓股票和选股设置">
           <form id="stockForm" class="stock-form">
@@ -123,8 +114,7 @@
                 <th>现价</th>
                 <th>涨跌幅</th>
                 <th>今高 / 今低</th>
-                <th>底仓情况</th>
-                <th>备注</th>
+                <th>底仓明细</th>
                 <th>更新时间</th>
                 <th>操作</th>
               </tr>
@@ -133,6 +123,13 @@
           </table>
           <div id="emptyState" class="empty" hidden>暂无持仓股票</div>
         </section>
+
+        <label class="result-box result-card">
+          <span>持仓操作建议</span>
+          <div id="holdingAdviceResult" class="pick-result advice-result">
+            暂无持仓操作建议。填写底仓明细后，下一次自动化会生成对应建议。
+          </div>
+        </label>
       </section>
     </main>
 
@@ -143,15 +140,13 @@
         <td data-key="change"></td>
         <td data-key="range"></td>
         <td data-key="basePosition"></td>
-        <td data-key="remark"></td>
         <td data-key="updatedAt"></td>
         <td>
-          <button class="edit" type="button">编辑</button>
           <button class="delete" type="button">删除</button>
         </td>
       </tr>
     </template>
 
-    <script src="./app.js?v=20260520-2"></script>
+    <script src="./app.js?v=20260520-3"></script>
   </body>
 </html>
