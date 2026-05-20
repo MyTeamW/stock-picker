@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>选股助手</title>
-    <link rel="stylesheet" href="./styles.css?v=20260513-4" />
+    <link rel="stylesheet" href="./styles.css?v=20260520-1" />
   </head>
   <body>
     <main class="shell">
@@ -55,37 +55,34 @@
             <input id="lotInput" name="lot" type="number" min="1" step="1" />
           </label>
           <button class="primary" type="submit">保存设置</button>
-          <button id="pickNowButton" class="secondary" type="button">现在选股</button>
         </form>
 
-        <div class="search-row">
-          <label>
-            <span>查询</span>
-            <input id="searchInput" autocomplete="off" placeholder="名称、代码或备注" />
-          </label>
-          <div class="setting-summary" id="settingSummary"></div>
-        </div>
+        <div class="setting-summary" id="settingSummary"></div>
       </section>
 
       <section class="assistant-panel" aria-label="AI选股助手">
         <div class="assistant-head">
           <div>
             <h2>AI 协作选股</h2>
-            <p>网页不直接调用模型；Codex 定时自动化写入结果，也可复制提示词手动分析。</p>
           </div>
           <div class="assistant-actions">
-            <button id="copyPromptButton" class="secondary" type="button">复制提示词</button>
-            <a class="primary link-button" href="https://chat.openai.com/" target="_blank" rel="noopener noreferrer">打开 ChatGPT</a>
+            <button id="refreshDefaultPromptButton" class="secondary" type="button">刷新默认提示词</button>
           </div>
         </div>
-        <label class="prompt-box">
-          <span>给 ChatGPT/Codex 的提示词</span>
-          <textarea id="promptOutput" rows="7" readonly></textarea>
-        </label>
+        <div class="prompt-stack">
+          <label class="prompt-box">
+            <span>默认提示词</span>
+            <textarea id="defaultPromptOutput" rows="8" readonly></textarea>
+          </label>
+          <label class="prompt-box">
+            <span>我的要求（可输入）</span>
+            <textarea id="userRequirementsInput" rows="5" placeholder="例如：只做短线、不要追高、偏好已有底仓且尾盘承接好的股票。"></textarea>
+          </label>
+        </div>
         <label class="result-box">
           <span>选股结果</span>
           <div id="pickResult" class="pick-result">
-            暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示；也可以点击“现在选股”生成本地提示词。
+            暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示。
           </div>
         </label>
       </section>
@@ -98,8 +95,7 @@
               <th>现价</th>
               <th>涨跌幅</th>
               <th>今高 / 今低</th>
-              <th>成交额</th>
-              <th>所属范围</th>
+              <th>底仓情况</th>
               <th>备注</th>
               <th>更新时间</th>
               <th>操作</th>
@@ -117,8 +113,7 @@
         <td data-key="price"></td>
         <td data-key="change"></td>
         <td data-key="range"></td>
-        <td data-key="turnover"></td>
-        <td data-key="priceFit"></td>
+        <td data-key="basePosition"></td>
         <td data-key="remark"></td>
         <td data-key="updatedAt"></td>
         <td>
@@ -128,6 +123,6 @@
       </tr>
     </template>
 
-    <script src="./app.js?v=20260513-4"></script>
+    <script src="./app.js?v=20260520-1"></script>
   </body>
 </html>

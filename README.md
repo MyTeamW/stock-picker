@@ -7,9 +7,10 @@
 - 股票增删改查，优先同步到 Supabase 在线数据库，失败时保存在浏览器 localStorage。
 - 通过公开行情接口刷新股票现价、涨跌幅、日内高低、成交额等基础信息。
 - 设置价格区间，默认人民币 70 元以内。
+- 维护每只股票的底仓情况，并把默认提示词和“我的要求”同步到 Supabase 设置。
 - Codex 定时自动化默认在交易日 14:30 分析并写入结果。
 - 设置买入量，默认 1 手。
-- 无 OpenAI API 模式：网页不直接调用模型；Codex 定时对话负责分析，也保留可复制提示词的手动备用方式。
+- 无 OpenAI API 模式：网页不直接调用模型；Codex 定时对话负责综合默认提示词、我的要求和股票池行情后写回结果。
 
 ## 重要说明
 
@@ -27,8 +28,8 @@
 
 定时对话的流程见 `CODEX_AUTOMATION.md`：
 
-- `scripts/read_codex_context.py --refresh-quotes` 读取 `picker_stocks`、设置和页面提示词上下文。
-- Codex 结合当天行情和提示词自行分析，不直接照搬规则分数。
+- `scripts/read_codex_context.py --refresh-quotes` 读取 `picker_stocks`、设置、默认提示词和“我的要求”，并先刷新默认提示词。
+- Codex 结合当天行情、默认提示词、我的要求和底仓情况自行分析，不直接照搬规则分数。
 - `scripts/write_codex_result.py result.json` 把结果写入 `picker_results`。
 
 网页打开时会读取最新 `picker_results` 并显示在“选股结果”里，不需要每天提交 GitHub Pages 静态文件。

@@ -10,6 +10,7 @@
   --info: #1d4ed8;
   --warn: #a16207;
   --danger: #b42318;
+  --deep-red: #8a0f0f;
   --gain: #b42318;
   --loss: #087443;
   --shadow: 0 18px 50px rgba(22, 34, 30, 0.08);
@@ -114,8 +115,7 @@ h2 {
 }
 
 .stock-form,
-.settings-form,
-.search-row {
+.settings-form {
   display: grid;
   gap: 12px;
   align-items: end;
@@ -126,12 +126,7 @@ h2 {
 }
 
 .settings-form {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto;
-}
-
-.search-row {
-  grid-template-columns: minmax(180px, 260px) 1fr;
-  align-items: center;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
 }
 
 label {
@@ -227,7 +222,7 @@ textarea:focus {
   min-width: 0;
   color: var(--muted);
   font-size: 14px;
-  text-align: right;
+  text-align: left;
 }
 
 .assistant-panel {
@@ -256,6 +251,11 @@ textarea:focus {
   gap: 10px;
 }
 
+.prompt-stack {
+  display: grid;
+  gap: 12px;
+}
+
 .pick-result {
   min-height: 58px;
   border: 1px solid #d7e7e4;
@@ -268,7 +268,13 @@ textarea:focus {
 }
 
 .pick-result strong {
-  color: var(--accent-strong);
+  color: var(--deep-red);
+}
+
+.result-title strong,
+.result-emphasis {
+  color: var(--deep-red);
+  font-weight: 800;
 }
 
 .result-line {
@@ -278,6 +284,14 @@ textarea:focus {
 .prompt-box textarea {
   min-height: 134px;
   line-height: 1.55;
+}
+
+.base-position-input {
+  min-height: 40px;
+  resize: vertical;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
 }
 
 .table-wrap {
@@ -313,8 +327,8 @@ td {
 
 th:first-child,
 td:first-child,
-th:nth-child(7),
-td:nth-child(7) {
+th:nth-child(6),
+td:nth-child(6) {
   text-align: left;
 }
 
@@ -324,25 +338,23 @@ td:first-child {
 }
 
 th:nth-child(4),
-td:nth-child(4),
+td:nth-child(4) {
+  width: 118px;
+}
+
 th:nth-child(5),
 td:nth-child(5) {
-  width: 118px;
+  width: 170px;
+  text-align: left;
 }
 
 th:nth-child(6),
 td:nth-child(6) {
-  width: 98px;
-  text-align: center;
+  width: 190px;
 }
 
 th:nth-child(7),
 td:nth-child(7) {
-  width: 190px;
-}
-
-th:nth-child(8),
-td:nth-child(8) {
   width: 110px;
 }
 
@@ -416,8 +428,7 @@ td:last-child {
 
 @media (max-width: 1050px) {
   .stock-form,
-  .settings-form,
-  .search-row {
+  .settings-form {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -436,7 +447,7 @@ td:last-child {
   }
 
   table {
-    min-width: 1160px;
+    min-width: 1040px;
   }
 
   th:first-child,
@@ -472,7 +483,6 @@ td:last-child {
 
   .stock-form,
   .settings-form,
-  .search-row,
   .assistant-actions {
     grid-template-columns: 1fr;
     width: 100%;

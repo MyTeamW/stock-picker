@@ -1,6 +1,5 @@
 const STORAGE_KEY = "myteamw-stock-picker-v1";
 const SETTINGS_KEY = "myteamw-stock-picker-settings-v1";
-const PICK_KEY = "myteamw-stock-picker-last-pick-v1";
 const SUPABASE_URL = "https://kawztespuaiztftoifdk.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Ydf2JJK06d4GMTE2awOSwg_3GZLTR27";
 const STOCK_TABLE = "picker_stocks";
@@ -13,19 +12,22 @@ const DEFAULT_SETTINGS = {
   maxPrice: 70,
   pickTime: "14:30",
   lot: 1,
+  defaultPrompt: "",
+  userRequirements: "",
+  basePositions: {},
 };
 
-const EMPTY_PICK_TEXT = "暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示；也可以点击“现在选股”生成本地提示词。";
+const EMPTY_PICK_TEXT = "暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示。";
 
 const state = {
   stocks: [],
   settings: { ...DEFAULT_SETTINGS },
-  query: "",
   editingCode: "",
-  lastPick: null,
   automationResult: null,
   remoteReady: false,
 };
+
+let settingsSyncTimer = null;
 
 const els = {
   clock: document.querySelector("#clockText"),
@@ -42,11 +44,10 @@ const els = {
   maxPrice: document.querySelector("#maxPriceInput"),
   lot: document.querySelector("#lotInput"),
   settingSummary: document.querySelector("#settingSummary"),
-  search: document.querySelector("#searchInput"),
-  pickNow: document.querySelector("#pickNowButton"),
   pickResult: document.querySelector("#pickResult"),
-  promptOutput: document.querySelector("#promptOutput"),
-  copyPrompt: document.querySelector("#copyPromptButton"),
+  defaultPrompt: document.querySelector("#defaultPromptOutput"),
+  userRequirements: document.querySelector("#userRequirementsInput"),
+  refreshDefaultPrompt: document.querySelector("#refreshDefaultPromptButton"),
   rows: document.querySelector("#stockRows"),
   template: document.querySelector("#rowTemplate"),
   empty: document.querySelector("#emptyState"),
@@ -115,6 +116,46 @@ function numberOrNull(value) {
   return Number.isFinite(num) ? num : null;
 }
 
+function usefulStockName(name, code) {
+  const text = String(name || "").trim();
+  if (!text) return "";
+  return normalizeCode(text) === normalizeCode(code) ? "" : text;
+}
+
+function displayStockName(stock) {
+  return usefulStockName(stock && stock.name, stock && stock.code) || (stock && stock.code) || "";
+}
+
+function normalizeSettings(raw = {}) {
+  const basePositions =
+    raw && typeof raw.basePositions === "object" && !Array.isArray(raw.basePositions) ? raw.basePositions : {};
+  const minPrice = Math.max(0, Number(raw.minPrice ?? DEFAULT_SETTINGS.minPrice) || DEFAULT_SETTINGS.minPrice);
+  const maxPrice = Math.max(minPrice, Number(raw.maxPrice ?? DEFAULT_SETTINGS.maxPrice) || DEFAULT_SETTINGS.maxPrice);
+  const lot = Math.max(1, Math.floor(Number(raw.lot ?? DEFAULT_SETTINGS.lot) || DEFAULT_SETTINGS.lot));
+  return {
+    ...DEFAULT_SETTINGS,
+    ...raw,
+    minPrice,
+    maxPrice,
+    pickTime: DEFAULT_SETTINGS.pickTime,
+    lot,
+    defaultPrompt: String(raw.defaultPrompt || ""),
+    userRequirements: String(raw.userRequirements || ""),
+    basePositions: { ...basePositions },
+  };
+}
+
+function basePositionFor(code) {
+  return String((state.settings.basePositions || {})[normalizeCode(code)] || "").trim();
+}
+
+function attachBasePositions(stocks) {
+  return stocks.map((stock) => ({
+    ...stock,
+    basePosition: basePositionFor(stock.code) || stock.basePosition || "",
+  }));
+}
+
 function quotePrice(value) {
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num / 100 : null;
@@ -179,16 +220,11 @@ function loadLocalState() {
   }
 
   try {
-    state.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") };
+    state.settings = normalizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"));
   } catch {
-    state.settings = { ...DEFAULT_SETTINGS };
+    state.settings = normalizeSettings();
   }
-
-  try {
-    state.lastPick = JSON.parse(localStorage.getItem(PICK_KEY) || "null");
-  } catch {
-    state.lastPick = null;
-  }
+  state.stocks = attachBasePositions(state.stocks);
 }
 
 function saveStocks() {
@@ -197,10 +233,6 @@ function saveStocks() {
 
 function saveSettings() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(state.settings));
-}
-
-function saveLastPick() {
-  localStorage.setItem(PICK_KEY, JSON.stringify(state.lastPick));
 }
 
 function supabaseHeaders(extra = {}) {
@@ -238,9 +270,10 @@ function fromDb(row) {
       : normalizePercentValue(row.change_percent);
   return {
     code: row.code,
-    name: row.name || row.code,
+    name: usefulStockName(row.name, row.code) || row.code,
     remark: row.remark || "",
     business: row.business || "",
+    basePosition: "",
     startDate: row.start_date || "",
     startPrice,
     price: closePrice,
@@ -262,7 +295,7 @@ function fromDb(row) {
 function toDb(stock) {
   return {
     code: stock.code,
-    name: stock.name || stock.code,
+    name: displayStockName(stock) || stock.code,
     remark: stock.remark || "",
     business: stock.business || "",
     price: numberOrNull(stock.price),
@@ -302,13 +335,14 @@ async function loadRemoteState() {
   try {
     const settingsRows = await supabaseRequest(`${SETTINGS_TABLE}?select=value&key=eq.${SETTINGS_ROW_KEY}&limit=1`);
     if (Array.isArray(settingsRows) && settingsRows[0] && settingsRows[0].value) {
-      state.settings = { ...DEFAULT_SETTINGS, ...settingsRows[0].value, pickTime: DEFAULT_SETTINGS.pickTime };
+      state.settings = normalizeSettings(settingsRows[0].value);
     } else {
-      state.settings = cachedSettings;
+      state.settings = normalizeSettings(cachedSettings);
     }
   } catch {
-    state.settings = cachedSettings;
+    state.settings = normalizeSettings(cachedSettings);
   }
+  state.stocks = attachBasePositions(state.stocks);
   saveStocks();
   saveSettings();
 }
@@ -320,6 +354,7 @@ async function initRemoteState() {
     fillSettingsForm();
     render();
     setStatus("在线数据库已连接");
+    await repairMissingStockNames();
   } catch {
     state.remoteReady = false;
     setStatus("在线数据库未就绪，正在使用本地缓存");
@@ -377,6 +412,9 @@ async function upsertRemoteSettings() {
           maxPrice: state.settings.maxPrice,
           pickTime: DEFAULT_SETTINGS.pickTime,
           lot: state.settings.lot,
+          defaultPrompt: state.settings.defaultPrompt || "",
+          userRequirements: state.settings.userRequirements || "",
+          basePositions: state.settings.basePositions || {},
         },
       }),
   });
@@ -497,11 +535,15 @@ async function fetchQuote(code) {
 async function hydrateStock(entry) {
   const quote = await fetchQuote(entry.code);
   const profile = await fetchProfile(entry.code);
+  const entryName = usefulStockName(entry.name, entry.code);
+  const quoteName = usefulStockName(quote.name, quote.code);
+  const profileName = usefulStockName(profile.name, entry.code);
   return {
     ...entry,
     ...quote,
-    name: entry.name || quote.name || profile.name || entry.code,
+    name: entryName || quoteName || profileName || entry.code,
     business: profile.business || entry.business || "",
+    basePosition: entry.basePosition || basePositionFor(entry.code),
     remark: entry.remark || "",
     createdAt: entry.createdAt || new Date().toISOString(),
   };
@@ -510,7 +552,7 @@ async function hydrateStock(entry) {
 function manualStock(entry) {
   return {
     ...entry,
-    name: entry.name || entry.code,
+    name: usefulStockName(entry.name, entry.code) || entry.code,
     price: null,
     high: null,
     low: null,
@@ -523,6 +565,7 @@ function manualStock(entry) {
     updatedAt: "",
     refreshedAt: new Date().toISOString(),
     business: entry.business || "",
+    basePosition: entry.basePosition || basePositionFor(entry.code),
     remark: entry.remark || "",
     createdAt: entry.createdAt || new Date().toISOString(),
   };
@@ -554,13 +597,7 @@ function priceFits(stock) {
 }
 
 function filteredStocks() {
-  const query = state.query.trim().toLowerCase();
-  if (!query) return state.stocks;
-  return state.stocks.filter((stock) => {
-    return [stock.code, stock.name, stock.remark, stock.business].some((value) =>
-      String(value || "").toLowerCase().includes(query),
-    );
-  });
+  return state.stocks;
 }
 
 function setTrend(cell, value) {
@@ -575,6 +612,46 @@ function renderSummary() {
   els.settingSummary.textContent = `价格区间：${money(state.settings.minPrice)} - ${money(state.settings.maxPrice)} 元；默认时间：${DEFAULT_SETTINGS.pickTime}；买入量：${state.settings.lot} 手（${lotShares} 股）；符合区间：${eligible} 只`;
 }
 
+function buildCandidateLine(stock, index) {
+  const displayIndex = Number(index) + 1;
+  const basePosition = stock.basePosition || basePositionFor(stock.code) || "未填写";
+  const remark = stock.remark || stock.business || "无";
+  return `${displayIndex}. ${displayStockName(stock)}（${stock.code}）：现价 ${money(stock.price)} 元，涨跌幅 ${percent(
+    stock.changePercent,
+  )}，今高/今低 ${money(stock.high)}/${money(stock.low)}，开盘/昨收 ${money(stock.open)}/${money(
+    stock.previousClose,
+  )}，底仓情况：${basePosition}，备注：${remark}`;
+}
+
+function buildDefaultPrompt() {
+  const ranked = eligibleStocks();
+  const visibleStocks = ranked.length > 0 ? ranked : [...state.stocks];
+  const selectedStock = visibleStocks[0] || null;
+  const candidateText = visibleStocks.slice(0, 8).map(buildCandidateLine).join("\n") || "暂无可用股票。";
+  const selectedText = selectedStock ? `${displayStockName(selectedStock)}（${selectedStock.code}）` : "暂无";
+  const lotShares = Number(state.settings.lot) * 100;
+
+  return [
+    "请你作为谨慎的 A 股短线选股助手，只根据本页面股票池、底仓情况、备注和今日行情，推荐 1 只今日买入观察标的。",
+    "请综合价格区间、涨跌幅、日内高低点、开盘/昨收、底仓情况和备注判断，不要机械照搬页面本地预选。",
+    `我的设置：价格区间 ${money(state.settings.minPrice)} - ${money(
+      state.settings.maxPrice,
+    )} 元；默认选股时间 ${DEFAULT_SETTINGS.pickTime}；计划买入 ${state.settings.lot} 手（${lotShares} 股）。`,
+    `页面本地预选候选：${selectedText}。这只是页面根据当前行情整理出的阅读顺序，不代表最终结论。`,
+    `股票池：\n${candidateText}`,
+    "请输出：推荐股票、推荐理由、需要回避的风险、买入量提醒、理想买点、止损位、短线目标区间，并明确不构成投资建议。",
+  ].join("\n\n");
+}
+
+function currentDefaultPrompt() {
+  return state.settings.defaultPrompt || buildDefaultPrompt();
+}
+
+function renderPromptInputs() {
+  els.defaultPrompt.value = currentDefaultPrompt();
+  els.userRequirements.value = state.settings.userRequirements || "";
+}
+
 function renderPickResult() {
   if (state.automationResult) {
     const result = state.automationResult;
@@ -582,27 +659,22 @@ function renderPickResult() {
     const summary = result.summary || "";
     const generatedAt = result.generatedAt ? ` <span class="muted">生成时间：${escapeHtml(result.generatedAt)}</span>` : "";
     els.pickResult.innerHTML = `
-      <div><strong>${escapeHtml(title)}</strong>${generatedAt}</div>
+      <div class="result-title"><strong>${escapeHtml(title)}</strong>${generatedAt}</div>
       ${summary ? `<div class="result-line">${escapeHtml(summary)}</div>` : ""}
       ${renderTextList("依据", result.rationale)}
       ${renderTextList("风险", result.risks)}
-      ${result.action ? `<div class="result-line"><strong>处理：</strong>${escapeHtml(result.action)}</div>` : ""}
+      ${
+        result.action
+          ? `<div class="result-line"><strong>短线操作：</strong><span class="result-emphasis">${escapeHtml(
+              result.action,
+            )}</span></div>`
+          : ""
+      }
     `;
-    els.promptOutput.value = result.prompt || "";
     return;
   }
 
-  if (!state.lastPick) {
-    els.pickResult.textContent = EMPTY_PICK_TEXT;
-    els.promptOutput.value = "";
-    return;
-  }
-  const { pickedAt, reason } = state.lastPick;
-  const stock = state.stocks.find((item) => item.code === state.lastPick.stock.code) || state.lastPick.stock;
-  els.pickResult.innerHTML = `候选：<strong>${stock.name || stock.code}（${stock.code}）</strong>，现价 ${money(
-    stock.price,
-  )} 元，买入量 ${state.settings.lot} 手。${reason} <span class="muted">生成时间：${pickedAt}</span>`;
-  els.promptOutput.value = buildPrompt(stock);
+  els.pickResult.textContent = EMPTY_PICK_TEXT;
 }
 
 function render() {
@@ -610,6 +682,7 @@ function render() {
   const stocks = filteredStocks();
   els.empty.hidden = stocks.length > 0;
   renderSummary();
+  renderPromptInputs();
 
   for (const stock of stocks) {
     const row = els.template.content.firstElementChild.cloneNode(true);
@@ -622,7 +695,7 @@ function render() {
     nameLine.href = `https://stockpage.10jqka.com.cn/${stock.code}/`;
     nameLine.target = "_blank";
     nameLine.rel = "noopener noreferrer";
-    nameLine.textContent = stock.name || stock.code;
+    nameLine.textContent = displayStockName(stock);
     codeLine.className = "stock-code";
     codeLine.textContent = `（${stock.code}）`;
     cells.identity.append(nameLine, codeLine);
@@ -630,9 +703,13 @@ function render() {
     cells.price.textContent = money(stock.price);
     setTrend(cells.change, stock.changePercent);
     cells.range.textContent = `${money(stock.high)} / ${money(stock.low)}`;
-    cells.turnover.textContent = compactMoney(stock.turnover);
-    cells.priceFit.textContent = priceFits(stock) ? "符合" : "超出";
-    cells.priceFit.className = priceFits(stock) ? "fit" : "miss";
+    const baseInput = document.createElement("textarea");
+    baseInput.className = "base-position-input";
+    baseInput.rows = 2;
+    baseInput.placeholder = "无 / 1手 / 成本39.20";
+    baseInput.value = stock.basePosition || basePositionFor(stock.code);
+    baseInput.addEventListener("change", () => saveBasePosition(stock.code, baseInput.value));
+    cells.basePosition.appendChild(baseInput);
     cells.remark.textContent = stock.remark || stock.business || "-";
     cells.updatedAt.textContent = stock.updatedAt || "-";
 
@@ -674,22 +751,23 @@ function editStock(code) {
   els.remark.value = stock.remark || "";
   els.code.disabled = true;
   els.saveStock.textContent = "保存修改";
-  setStatus(`正在编辑 ${stock.name || stock.code}`);
+  setStatus(`正在编辑 ${displayStockName(stock)}`);
 }
 
 async function deleteStock(code) {
   const stock = state.stocks.find((item) => item.code === code);
   state.stocks = state.stocks.filter((item) => item.code !== code);
-  if (state.lastPick && state.lastPick.stock && state.lastPick.stock.code === code) {
-    state.lastPick = null;
-    saveLastPick();
+  if (state.settings.basePositions && state.settings.basePositions[code]) {
+    delete state.settings.basePositions[code];
+    saveSettings();
   }
   saveStocks();
   clearForm();
   render();
-  setStatus(`${stock ? stock.name || stock.code : code} 已删除，正在同步`);
+  setStatus(`${stock ? displayStockName(stock) : code} 已删除，正在同步`);
   await patchRemoteStock(code, { deleted: true });
-  setStatus(`${stock ? stock.name || stock.code : code} 已删除`);
+  await upsertRemoteSettings();
+  setStatus(`${stock ? displayStockName(stock) : code} 已删除`);
 }
 
 async function upsertStockFromForm(event) {
@@ -702,7 +780,7 @@ async function upsertStockFromForm(event) {
     if (state.editingCode) {
       const editCode = state.editingCode;
       state.stocks = state.stocks.map((stock) =>
-        stock.code === editCode ? { ...stock, name: rawName || stock.name, remark } : stock,
+        stock.code === editCode ? { ...stock, name: usefulStockName(rawName, editCode) || stock.name, remark } : stock,
       );
       saveStocks();
       clearForm();
@@ -730,12 +808,13 @@ async function upsertStockFromForm(event) {
       hydrated = manualStock({ ...entry, remark });
     }
     state.stocks = [hydrated, ...state.stocks.filter((stock) => stock.code !== hydrated.code)];
+    state.stocks = attachBasePositions(state.stocks);
     saveStocks();
     clearForm();
     render();
-    setStatus(`${hydrated.name || hydrated.code} 已添加，正在同步`);
+    setStatus(`${displayStockName(hydrated)} 已添加，正在同步`);
     await upsertRemoteStock(hydrated);
-    setStatus(`${hydrated.name || hydrated.code} 已添加`);
+    setStatus(`${displayStockName(hydrated)} 已添加`);
   } catch (error) {
     setStatus(error.message || "添加失败");
   }
@@ -756,27 +835,92 @@ async function refreshStocks() {
       refreshed.push(stock);
     }
   }
-  state.stocks = refreshed;
+  state.stocks = attachBasePositions(refreshed);
   saveStocks();
+  state.settings.defaultPrompt = buildDefaultPrompt();
+  saveSettings();
   render();
   setStatus(`已刷新 ${state.stocks.length} 只股票，正在同步`);
   for (const stock of state.stocks) {
     await upsertRemoteStock(stock);
   }
+  await upsertRemoteSettings();
   setStatus(`已刷新 ${state.stocks.length} 只股票`);
+}
+
+async function repairMissingStockNames() {
+  if (!state.stocks.some((stock) => !usefulStockName(stock.name, stock.code))) return;
+
+  setStatus("正在补全股票名称");
+  let changed = false;
+  const repaired = [];
+  for (const stock of state.stocks) {
+    if (usefulStockName(stock.name, stock.code)) {
+      repaired.push(stock);
+      continue;
+    }
+    try {
+      const hydrated = await hydrateStock(stock);
+      changed = changed || Boolean(usefulStockName(hydrated.name, hydrated.code));
+      repaired.push(hydrated);
+    } catch {
+      repaired.push(stock);
+    }
+  }
+
+  if (!changed) {
+    setStatus("股票名称待刷新");
+    return;
+  }
+
+  state.stocks = attachBasePositions(repaired);
+  state.settings.defaultPrompt = buildDefaultPrompt();
+  saveStocks();
+  saveSettings();
+  render();
+  for (const stock of state.stocks) {
+    if (usefulStockName(stock.name, stock.code)) await upsertRemoteStock(stock);
+  }
+  await upsertRemoteSettings();
+  setStatus("股票名称已补全");
 }
 
 function scoreStock(stock) {
   const price = Number(stock.price);
   const change = normalizePercentValue(stock.changePercent);
-  const min = Number(state.settings.minPrice);
-  const max = Number(state.settings.maxPrice);
-  const span = Math.max(max - min, 1);
-  const priceComfort = Number.isFinite(price) ? 1 - Math.min(Math.max((price - min) / span, 0), 1) : 0;
-  const stability = Number.isFinite(change) ? Math.max(0, 1 - Math.abs(change) / 8) : 0.35;
-  const liquidity = Number(stock.turnover) > 100000000 ? 1 : Number(stock.turnover) > 20000000 ? 0.6 : 0.25;
-  const momentum = Number.isFinite(change) && change > -4 && change < 6 ? 1 : 0.25;
-  return priceComfort * 30 + stability * 30 + liquidity * 20 + momentum * 20;
+  const high = Number(stock.high);
+  const low = Number(stock.low);
+  const turnover = Number(stock.turnover);
+  if (!Number.isFinite(price) || !priceFits(stock)) return -999;
+
+  let score = 0;
+  score += price >= 6 && price <= 60 ? 18 : 8;
+  if (Number.isFinite(change)) {
+    if (change >= -1.5 && change <= 4.5) score += 28;
+    else if (change > 4.5 && change <= 7.5) score += 18;
+    else if (change >= -4 && change < -1.5) score += 12;
+    else score += 4;
+  } else {
+    score += 8;
+  }
+
+  if (Number.isFinite(high) && Number.isFinite(low) && high > low) {
+    const intradayPosition = (price - low) / (high - low);
+    if (intradayPosition >= 0.35 && intradayPosition <= 0.78) score += 24;
+    else if (intradayPosition < 0.35) score += 14;
+    else score += 8;
+  }
+
+  if (Number.isFinite(turnover)) {
+    if (turnover >= 500000000) score += 18;
+    else if (turnover >= 100000000) score += 12;
+    else if (turnover >= 30000000) score += 6;
+  }
+
+  const theme = `${stock.remark || ""} ${stock.business || ""}`;
+  if (/通信|电力|新能源|半导体|智能|光|电子|材料|算力|AI/u.test(theme)) score += 10;
+  if (/^(688|300|301)/.test(stock.code || "")) score -= 3;
+  return score;
 }
 
 function eligibleStocks() {
@@ -786,57 +930,43 @@ function eligibleStocks() {
     .sort((a, b) => b.score - a.score);
 }
 
-function buildPrompt(selectedStock) {
-  const candidates = eligibleStocks()
-    .slice(0, 8)
-    .map((stock, index) => {
-      return `${index + 1}. ${stock.name || stock.code}（${stock.code}）：现价${money(stock.price)}元，涨跌幅${percent(
-        stock.changePercent,
-      )}，今高/今低${money(stock.high)}/${money(stock.low)}，成交额${compactMoney(stock.turnover)}，备注：${
-        stock.remark || stock.business || "无"
-      }`;
-    })
-    .join("\n");
-
-  return `请你作为谨慎的 A 股分析助手，基于我提供的股票列表，每个交易日只推荐 1 只今日买入观察标的，并说明理由和风险点。最终推荐由你根据列表和今日行情独立判断，不要把页面本地排序当成结论。我在下午两点半左右给你的列表，请结合实时数据进行分析。输出请包含但不限于：推荐股票、为什么推荐、需要回避的风险、买入量提醒、买法（例如：不追 68.5 元以上。理想买点：64.8–66.3 元附近低吸。止损：跌破 63.5 元，短线走。目标：先看 69.5–72 元。）。\n\n我的设置：价格区间 ${money(
-    state.settings.minPrice,
-  )} - ${money(state.settings.maxPrice)} 元；默认选股时间 ${DEFAULT_SETTINGS.pickTime}；计划买入 ${state.settings.lot} 手（${
-    Number(state.settings.lot) * 100
-  } 股）。\n\n页面本地排序第一名：${selectedStock.name || selectedStock.code}（${selectedStock.code}），只作为阅读顺序参考，不代表最终结论。\n\n股票列表：\n${candidates}`;
+function scheduleSettingsSync(successText = "页面信息已保存") {
+  saveSettings();
+  window.clearTimeout(settingsSyncTimer);
+  settingsSyncTimer = window.setTimeout(async () => {
+    const synced = await upsertRemoteSettings();
+    if (synced) setStatus(successText);
+  }, 700);
 }
 
-function pickStock({ automatic = false } = {}) {
-  const candidates = eligibleStocks();
-  if (candidates.length === 0) {
-    const text = "没有股票同时满足当前价格区间和可用行情。请先添加股票、刷新行情，或调整价格区间。";
-    els.pickResult.textContent = text;
-    els.promptOutput.value = "";
-    setStatus(text);
-    return;
-  }
-
-  const stock = candidates[0];
-  const pickedAt = new Intl.DateTimeFormat("zh-CN", { dateStyle: "short", timeStyle: "medium" }).format(new Date());
-  const reason = `规则筛选分最高：价格在区间内，涨跌幅和流动性相对更稳。请复制提示词到 ChatGPT/Codex 做最终判断。`;
-  state.lastPick = { stock, pickedAt, reason, automatic };
-  saveLastPick();
-  render();
-  setStatus(automatic ? "已按设置时间生成候选" : "已生成候选");
+async function refreshDefaultPrompt() {
+  state.settings.defaultPrompt = buildDefaultPrompt();
+  saveSettings();
+  renderPromptInputs();
+  setStatus("默认提示词已刷新，正在同步");
+  await upsertRemoteSettings();
+  setStatus("默认提示词已刷新");
 }
 
-function maybeAutoPick() {
-  if (state.stocks.length === 0) return;
-  const now = chinaNow();
-  const today = formatDate(now);
-  const [hour, minute] = DEFAULT_SETTINGS.pickTime.split(":").map(Number);
-  const reached = now.getHours() > hour || (now.getHours() === hour && now.getMinutes() >= minute);
-  if (!reached) return;
-  if (state.lastPick && state.lastPick.date === today) return;
-  pickStock({ automatic: true });
-  if (state.lastPick) {
-    state.lastPick.date = today;
-    saveLastPick();
+function saveUserRequirements() {
+  state.settings.userRequirements = els.userRequirements.value.trim();
+  scheduleSettingsSync("我的要求已保存");
+}
+
+function saveBasePosition(code, value) {
+  const cleanCode = normalizeCode(code);
+  const text = String(value || "").trim();
+  state.settings.basePositions = { ...(state.settings.basePositions || {}) };
+  if (text) {
+    state.settings.basePositions[cleanCode] = text;
+  } else {
+    delete state.settings.basePositions[cleanCode];
   }
+  state.stocks = state.stocks.map((stock) => (stock.code === cleanCode ? { ...stock, basePosition: text } : stock));
+  state.settings.defaultPrompt = buildDefaultPrompt();
+  saveStocks();
+  renderPromptInputs();
+  scheduleSettingsSync("底仓情况已保存");
 }
 
 async function saveSettingsFromForm(event) {
@@ -845,11 +975,13 @@ async function saveSettingsFromForm(event) {
   const maxPrice = Math.max(minPrice, Number(els.maxPrice.value) || DEFAULT_SETTINGS.maxPrice);
   const lot = Math.max(1, Math.floor(Number(els.lot.value) || DEFAULT_SETTINGS.lot));
   state.settings = {
+    ...state.settings,
     minPrice,
     maxPrice,
     pickTime: DEFAULT_SETTINGS.pickTime,
     lot,
   };
+  state.settings.defaultPrompt = buildDefaultPrompt();
   fillSettingsForm();
   saveSettings();
   render();
@@ -858,30 +990,12 @@ async function saveSettingsFromForm(event) {
   setStatus("选股设置已保存");
 }
 
-async function copyPrompt() {
-  if (!els.promptOutput.value.trim()) {
-    pickStock();
-  }
-  if (!els.promptOutput.value.trim()) return;
-  try {
-    await navigator.clipboard.writeText(els.promptOutput.value);
-    setStatus("提示词已复制");
-  } catch {
-    els.promptOutput.select();
-    setStatus("请手动复制提示词");
-  }
-}
-
 els.form.addEventListener("submit", upsertStockFromForm);
 els.clearForm.addEventListener("click", clearForm);
 els.settingsForm.addEventListener("submit", saveSettingsFromForm);
 els.refresh.addEventListener("click", refreshStocks);
-els.pickNow.addEventListener("click", () => pickStock());
-els.copyPrompt.addEventListener("click", copyPrompt);
-els.search.addEventListener("input", () => {
-  state.query = els.search.value;
-  render();
-});
+els.refreshDefaultPrompt.addEventListener("click", refreshDefaultPrompt);
+els.userRequirements.addEventListener("input", saveUserRequirements);
 
 loadLocalState();
 fillSettingsForm();

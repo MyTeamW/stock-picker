@@ -55,6 +55,14 @@ def normalize_code(value: str) -> str:
   return code
 
 
+def useful_stock_name(name: Any, code: Any, fallback: str = "") -> str:
+  text = str(name or "").strip()
+  clean_code = str(code or "").strip()
+  if text and not (re.fullmatch(r"\d{6}", text) and text == clean_code):
+    return text
+  return fallback or clean_code
+
+
 def exchange_prefix(code: str) -> str:
   return "1" if code.startswith(("6", "9")) else "0"
 
@@ -128,6 +136,18 @@ def request_json(url: str, *, method: str = "GET", body: Any = None, headers: di
     return json.loads(text)
 
 
+def request_text(url: str, *, headers: dict[str, str] | None = None, encoding: str = "utf-8") -> str:
+  request_headers = {
+    "User-Agent": "Mozilla/5.0 StockPickerAutomation/1.0",
+    "Accept": "text/plain,*/*",
+  }
+  if headers:
+    request_headers.update(headers)
+  request = Request(url, headers=request_headers)
+  with urlopen(request, timeout=15) as response:
+    return response.read().decode(encoding, errors="replace")
+
+
 def supabase_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
   headers = {
     "apikey": SUPABASE_KEY,
@@ -145,7 +165,54 @@ def supabase(path: str, *, method: str = "GET", body: Any = None, prefer: str | 
   return request_json(url, method=method, body=body, headers=headers)
 
 
-def fetch_quote(code: str) -> Quote:
+def sina_symbol(code: str) -> str:
+  clean = normalize_code(code)
+  if clean.startswith(("6", "9")):
+    return f"sh{clean}"
+  if clean.startswith(("4", "8")):
+    return f"bj{clean}"
+  return f"sz{clean}"
+
+
+def fetch_sina_quote(code: str) -> Quote:
+  clean = normalize_code(code)
+  text = request_text(
+    f"https://hq.sinajs.cn/list={sina_symbol(clean)}",
+    headers={"Referer": "https://finance.sina.com.cn/"},
+    encoding="gbk",
+  )
+  match = re.search(r'="([^"]*)"', text)
+  values = match.group(1).split(",") if match else []
+  if len(values) < 32 or not values[0]:
+    raise RuntimeError(f"no sina quote data for {clean}")
+  name = values[0].strip() or clean
+  open_price = plain_number(values[1])
+  previous_close = plain_number(values[2])
+  price = plain_number(values[3])
+  high = plain_number(values[4])
+  low = plain_number(values[5])
+  volume = plain_number(values[8])
+  turnover = plain_number(values[9])
+  date_text = values[30] if len(values) > 30 else now_china().date().isoformat()
+  change_amount = price - previous_close if price is not None and previous_close else None
+  change_percent = (change_amount / previous_close) * 100 if change_amount is not None and previous_close else None
+  return Quote(
+    code=clean,
+    name=name,
+    price=price,
+    high=high,
+    low=low,
+    open=open_price,
+    previous_close=previous_close,
+    change_amount=change_amount,
+    change_percent=change_percent,
+    volume=volume,
+    turnover=turnover,
+    quote_date=date_text if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_text) else now_china().date().isoformat(),
+  )
+
+
+def fetch_eastmoney_quote(code: str) -> Quote:
   clean = normalize_code(code)
   params = {
     "secid": f"{exchange_prefix(clean)}.{clean}",
@@ -171,11 +238,18 @@ def fetch_quote(code: str) -> Quote:
   )
 
 
+def fetch_quote(code: str) -> Quote:
+  try:
+    return fetch_eastmoney_quote(code)
+  except (HTTPError, URLError, TimeoutError, RemoteDisconnected, RuntimeError, ValueError):
+    return fetch_sina_quote(code)
+
+
 def merge_quote(stock: dict[str, Any], quote: Quote) -> dict[str, Any]:
   return {
     **stock,
     "code": quote.code,
-    "name": stock.get("name") or quote.name,
+    "name": useful_stock_name(stock.get("name"), quote.code, quote.name),
     "price": quote.price,
     "high": quote.high,
     "low": quote.low,
@@ -193,7 +267,7 @@ def merge_quote(stock: dict[str, Any], quote: Quote) -> dict[str, Any]:
 def stock_payload(stock: dict[str, Any]) -> dict[str, Any]:
   return {
     "code": stock["code"],
-    "name": stock.get("name") or stock["code"],
+    "name": useful_stock_name(stock.get("name"), stock["code"], stock["code"]),
     "remark": stock.get("remark") or "",
     "business": stock.get("business") or "",
     "price": stock.get("price"),
@@ -233,7 +307,15 @@ def refresh_stocks(stocks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], 
 
 
 def load_settings() -> dict[str, Any]:
-  settings = {"minPrice": 0, "maxPrice": 70, "pickTime": "14:30", "lot": 1}
+  settings = {
+    "minPrice": 0,
+    "maxPrice": 70,
+    "pickTime": "14:30",
+    "lot": 1,
+    "defaultPrompt": "",
+    "userRequirements": "",
+    "basePositions": {},
+  }
   try:
     rows = supabase(f"{SETTINGS_TABLE}?select=value&key=eq.{SETTINGS_ROW_KEY}&limit=1")
   except Exception:
@@ -241,6 +323,10 @@ def load_settings() -> dict[str, Any]:
   if isinstance(rows, list) and rows and isinstance(rows[0].get("value"), dict):
     settings.update(rows[0]["value"])
   settings["pickTime"] = "14:30"
+  if not isinstance(settings.get("basePositions"), dict):
+    settings["basePositions"] = {}
+  settings["defaultPrompt"] = str(settings.get("defaultPrompt") or "")
+  settings["userRequirements"] = str(settings.get("userRequirements") or "")
   return settings
 
 

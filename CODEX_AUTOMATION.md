@@ -10,7 +10,7 @@
    python scripts\read_codex_context.py --refresh-quotes
    ```
 
-2. Codex 根据输出里的 `page_prompt`、`stocks`、`ranked_candidates` 和当天行情自行分析，不直接照搬规则分数。
+2. 脚本会先刷新页面默认提示词，并把 `default_prompt` 写回 `picker_settings.defaultPrompt`。Codex 根据输出里的 `default_prompt`、`user_requirements`、`stocks`、`ranked_candidates` 和当天行情自行分析，不直接照搬规则分数。
 
 3. Codex 生成结果 JSON，然后写入 Supabase：
 
@@ -24,8 +24,8 @@
 
 ```text
 每个交易日 14:30 执行。进入 F:\Codes\Stock_Tracker\stock-picker-live。
-先运行 python scripts\read_codex_context.py --refresh-quotes 读取 stock-picker 页面对应的 Supabase 股票池和页面提示词。
-你自己做谨慎的 A 股分析，不要使用 tracker 数据库，不要触发 GitHub Actions。
+先运行 python scripts\read_codex_context.py --refresh-quotes 读取 stock-picker 页面对应的 Supabase 股票池、默认提示词和“我的要求”。
+你自己综合默认提示词、我的要求、底仓情况、页面其它信息和今日行情做谨慎的 A 股分析，不要使用 tracker 数据库，不要触发 GitHub Actions。
 分析后生成符合 write_result_schema 的 JSON，并运行 python scripts\write_codex_result.py result.json 写入 picker_results。
 结果必须包含候选股票、理由、风险、买入量提醒、理想买点、止损、目标区间，并写明不构成投资建议。
 ```
