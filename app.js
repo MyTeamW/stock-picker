@@ -8,6 +8,7 @@ const TRACKER_URL = "https://myteamw.github.io/tracker/";
 const SETTINGS_TABLE = "picker_settings";
 const RESULT_TABLE = "picker_results";
 const SETTINGS_ROW_KEY = "default";
+const DEFAULT_USER_REQUIREMENTS = "价格区间 0.00 - 70.00 元；计划买入 1 手（100 股）。";
 
 const DEFAULT_SETTINGS = {
   minPrice: 0,
@@ -15,7 +16,7 @@ const DEFAULT_SETTINGS = {
   pickTime: "14:30",
   lot: 1,
   defaultPrompt: "",
-  userRequirements: "",
+  userRequirements: DEFAULT_USER_REQUIREMENTS,
   basePositions: {},
 };
 
@@ -38,20 +39,17 @@ const els = {
   status: document.querySelector("#updateStatus"),
   refresh: document.querySelector("#refreshButton"),
   form: document.querySelector("#stockForm"),
-  code: document.querySelector("#codeInput"),
-  name: document.querySelector("#nameInput"),
-  remark: document.querySelector("#remarkInput"),
+  stockQuery: document.querySelector("#stockQueryInput"),
+  buyLots: document.querySelector("#buyLotsInput"),
+  buyPrice: document.querySelector("#buyPriceInput"),
   saveStock: document.querySelector("#saveStockButton"),
   clearForm: document.querySelector("#clearFormButton"),
-  settingsForm: document.querySelector("#settingsForm"),
-  minPrice: document.querySelector("#minPriceInput"),
-  maxPrice: document.querySelector("#maxPriceInput"),
-  lot: document.querySelector("#lotInput"),
   settingSummary: document.querySelector("#settingSummary"),
   holdingCount: document.querySelector("#holdingCount"),
+  bigPoolList: document.querySelector("#bigPoolList"),
+  bigPoolCount: document.querySelector("#bigPoolCount"),
   buyPickResult: document.querySelector("#buyPickResult"),
   holdingAdviceResult: document.querySelector("#holdingAdviceResult"),
-  defaultPrompt: document.querySelector("#defaultPromptOutput"),
   userRequirements: document.querySelector("#userRequirementsInput"),
   refreshDefaultPrompt: document.querySelector("#refreshDefaultPromptButton"),
   rows: document.querySelector("#stockRows"),
@@ -96,6 +94,30 @@ function chinaNow() {
 function money(value) {
   const num = Number(value);
   return Number.isFinite(num) ? num.toFixed(2) : "-";
+}
+
+function formatLots(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return "";
+  return num % 1 === 0 ? String(num) : num.toFixed(2).replace(/0+$/u, "").replace(/\.$/u, "");
+}
+
+function formatGeneratedAt(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })
+    .format(date)
+    .replace(/\//gu, "-");
 }
 
 function percent(value) {
@@ -150,6 +172,7 @@ function normalizeSettings(raw = {}) {
   const minPrice = Math.max(0, Number(raw.minPrice ?? DEFAULT_SETTINGS.minPrice) || DEFAULT_SETTINGS.minPrice);
   const maxPrice = Math.max(minPrice, Number(raw.maxPrice ?? DEFAULT_SETTINGS.maxPrice) || DEFAULT_SETTINGS.maxPrice);
   const lot = Math.max(1, Math.floor(Number(raw.lot ?? DEFAULT_SETTINGS.lot) || DEFAULT_SETTINGS.lot));
+  const userRequirements = String(raw.userRequirements || "").trim() || DEFAULT_USER_REQUIREMENTS;
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
@@ -158,7 +181,7 @@ function normalizeSettings(raw = {}) {
     pickTime: DEFAULT_SETTINGS.pickTime,
     lot,
     defaultPrompt: String(raw.defaultPrompt || ""),
-    userRequirements: String(raw.userRequirements || ""),
+    userRequirements,
     basePositions: { ...basePositions },
   };
 }
@@ -203,6 +226,14 @@ function formatBasePosition(value) {
   const inline = text.replace(/\s*\n+\s*/g, "；");
   const summary = basePositionSummary(text);
   return summary ? `${inline}（${summary}）` : inline;
+}
+
+function buildBasePositionLine(price, lots) {
+  return `${money(price)} / ${formatLots(lots)}手`;
+}
+
+function appendBasePosition(existing, nextLine) {
+  return [String(existing || "").trim(), String(nextLine || "").trim()].filter(Boolean).join("\n");
 }
 
 function attachBasePositions(stocks) {
@@ -502,7 +533,7 @@ async function initRemoteState() {
   try {
     await loadRemoteState();
     state.remoteReady = true;
-    fillSettingsForm();
+    fillHoldingFormDefaults();
     render();
     setStatus("在线数据库已连接");
     await repairMissingStockNames();
@@ -564,7 +595,7 @@ async function upsertRemoteSettings() {
           pickTime: DEFAULT_SETTINGS.pickTime,
           lot: state.settings.lot,
           defaultPrompt: state.settings.defaultPrompt || "",
-          userRequirements: state.settings.userRequirements || "",
+          userRequirements: state.settings.userRequirements || DEFAULT_USER_REQUIREMENTS,
           basePositions: state.settings.basePositions || {},
         },
       }),
@@ -722,10 +753,10 @@ function manualStock(entry) {
   };
 }
 
-function fillSettingsForm() {
-  els.minPrice.value = state.settings.minPrice;
-  els.maxPrice.value = state.settings.maxPrice;
-  els.lot.value = state.settings.lot;
+function fillHoldingFormDefaults() {
+  if (els.buyLots && !els.buyLots.value) {
+    els.buyLots.value = state.settings.lot || DEFAULT_SETTINGS.lot;
+  }
 }
 
 function updateClock() {
@@ -872,8 +903,30 @@ function currentDefaultPrompt() {
 }
 
 function renderPromptInputs() {
-  els.defaultPrompt.value = currentDefaultPrompt();
-  els.userRequirements.value = state.settings.userRequirements || "";
+  els.userRequirements.value = state.settings.userRequirements || DEFAULT_USER_REQUIREMENTS;
+}
+
+function renderBigPoolList() {
+  if (!els.bigPoolList || !els.bigPoolCount) return;
+  const stocks = state.bigPool.filter((stock) => stock && stock.code);
+  els.bigPoolCount.textContent = `${stocks.length} 只`;
+  if (stocks.length === 0) {
+    els.bigPoolList.textContent = "暂无大池股票";
+    return;
+  }
+
+  els.bigPoolList.innerHTML = stocks
+    .map((stock) => {
+      const name = displayStockName(stock);
+      const code = normalizeCode(stock.code);
+      return `
+        <a class="pool-item" href="https://stockpage.10jqka.com.cn/${code}/" target="_blank" rel="noopener noreferrer">
+          <span class="pool-name">${escapeHtml(name)}</span>
+          <span class="pool-code">${escapeHtml(code)}</span>
+        </a>
+      `;
+    })
+    .join("");
 }
 
 function renderResultBlock(container, section, emptyText) {
@@ -885,7 +938,7 @@ function renderResultBlock(container, section, emptyText) {
   const summary = section.summary || "";
   const generatedAt =
     state.automationResult && state.automationResult.generatedAt
-      ? ` <span class="muted">生成时间：${escapeHtml(state.automationResult.generatedAt)}</span>`
+      ? ` <span class="muted">生成时间：${escapeHtml(formatGeneratedAt(state.automationResult.generatedAt))}</span>`
       : "";
   container.innerHTML = `
     <div class="result-title"><strong>${escapeHtml(title)}</strong>${generatedAt}</div>
@@ -950,6 +1003,7 @@ function render() {
   els.empty.hidden = stocks.length > 0;
   renderSummary();
   renderPromptInputs();
+  renderBigPoolList();
 
   for (const stock of stocks) {
     const row = els.template.content.firstElementChild.cloneNode(true);
@@ -970,22 +1024,18 @@ function render() {
     cells.price.textContent = money(stock.price);
     setTrend(cells.change, stock.changePercent);
     cells.range.textContent = `${money(stock.high)} / ${money(stock.low)}`;
-    const baseInput = document.createElement("textarea");
+    const baseDetail = document.createElement("div");
     const baseSummary = document.createElement("div");
-    baseInput.className = "base-position-input";
+    const baseText = stock.basePosition || basePositionFor(stock.code);
+    const formattedBase = formatBasePosition(baseText);
+    baseDetail.className = "base-position-detail";
     baseSummary.className = "base-position-summary";
-    baseInput.rows = 4;
-    baseInput.placeholder = "63.00 / 1手\n65.00 / 1手";
-    baseInput.value = stock.basePosition || basePositionFor(stock.code);
-    const updateBaseSummary = () => {
-      const summary = basePositionSummary(baseInput.value);
-      baseSummary.textContent = summary;
-      baseSummary.hidden = !summary;
-    };
-    baseInput.addEventListener("input", updateBaseSummary);
-    baseInput.addEventListener("change", () => saveBasePosition(stock.code, baseInput.value));
-    updateBaseSummary();
-    cells.basePosition.append(baseInput, baseSummary);
+    baseDetail.textContent = formattedBase || "未填写";
+    baseDetail.classList.toggle("is-empty", !formattedBase);
+    const summary = basePositionSummary(baseText);
+    baseSummary.textContent = summary;
+    baseSummary.hidden = !summary;
+    cells.basePosition.append(baseDetail, baseSummary);
     cells.updatedAt.textContent = stock.updatedAt || "-";
 
     row.querySelector(".delete").addEventListener("click", () => deleteStock(stock.code));
@@ -1014,20 +1064,8 @@ async function loadAutomationResult() {
 function clearForm() {
   state.editingCode = "";
   els.form.reset();
+  fillHoldingFormDefaults();
   els.saveStock.textContent = "添加股票";
-  els.code.disabled = false;
-}
-
-function editStock(code) {
-  const stock = state.stocks.find((item) => item.code === code);
-  if (!stock) return;
-  state.editingCode = code;
-  els.code.value = stock.code;
-  els.name.value = stock.name || "";
-  els.remark.value = stock.remark || "";
-  els.code.disabled = true;
-  els.saveStock.textContent = "保存修改";
-  setStatus(`正在编辑 ${displayStockName(stock)}`);
 }
 
 async function deleteStock(code) {
@@ -1035,8 +1073,9 @@ async function deleteStock(code) {
   state.stocks = state.stocks.filter((item) => item.code !== code);
   if (state.settings.basePositions && state.settings.basePositions[code]) {
     delete state.settings.basePositions[code];
-    saveSettings();
   }
+  state.settings.defaultPrompt = buildDefaultPrompt();
+  saveSettings();
   saveStocks();
   clearForm();
   render();
@@ -1048,48 +1087,47 @@ async function deleteStock(code) {
 
 async function upsertStockFromForm(event) {
   event.preventDefault();
-  const rawCode = normalizeCode(els.code.value);
-  const rawName = els.name.value.trim();
-  const remark = els.remark.value.trim();
+  const query = els.stockQuery.value.trim();
+  const buyLots = Math.max(1, Math.floor(Number(els.buyLots.value) || 0));
+  const buyPrice = Number(els.buyPrice.value);
 
   try {
-    if (state.editingCode) {
-      const editCode = state.editingCode;
-      state.stocks = state.stocks.map((stock) =>
-        stock.code === editCode ? { ...stock, name: usefulStockName(rawName, editCode) || stock.name, remark } : stock,
-      );
-      saveStocks();
-      clearForm();
-      render();
-      setStatus("股票信息已保存，正在同步");
-      const saved = state.stocks.find((stock) => stock.code === editCode);
-      if (saved) await upsertRemoteStock(saved);
-      setStatus("股票信息已保存");
-      return;
-    }
-
-    let entry = {};
-    if (isCode(rawCode)) entry = { code: rawCode, name: rawName };
-    else if (rawName) entry = await resolveStockByName(rawName);
-    else {
+    if (!query) {
       setStatus("请输入股票代码或股票名称");
       return;
     }
+    if (!Number.isFinite(buyPrice) || buyPrice <= 0) {
+      setStatus("请输入有效买入价");
+      return;
+    }
+
+    const rawCode = normalizeCode(query);
+    let entry = {};
+    if (isCode(rawCode)) entry = { code: rawCode, name: "" };
+    else entry = await resolveStockByName(query);
 
     setStatus(`正在添加 ${entry.name || entry.code}`);
+    const positionLine = buildBasePositionLine(buyPrice, buyLots);
+    const previousPosition = basePositionFor(entry.code);
+    const basePosition = appendBasePosition(previousPosition, positionLine);
     let hydrated;
     try {
-      hydrated = await hydrateStock({ ...entry, remark });
+      hydrated = await hydrateStock({ ...entry, basePosition });
     } catch {
-      hydrated = manualStock({ ...entry, remark });
+      hydrated = manualStock({ ...entry, basePosition });
     }
+    hydrated.basePosition = basePosition;
+    state.settings.basePositions = { ...(state.settings.basePositions || {}), [hydrated.code]: basePosition };
     state.stocks = [hydrated, ...state.stocks.filter((stock) => stock.code !== hydrated.code)];
     state.stocks = attachBasePositions(state.stocks);
+    state.settings.defaultPrompt = buildDefaultPrompt();
     saveStocks();
+    saveSettings();
     clearForm();
     render();
     setStatus(`${displayStockName(hydrated)} 已添加，正在同步`);
     await upsertRemoteStock(hydrated);
+    await upsertRemoteSettings();
     setStatus(`${displayStockName(hydrated)} 已添加`);
   } catch (error) {
     setStatus(error.message || "添加失败");
@@ -1245,36 +1283,14 @@ function saveBasePosition(code, value) {
   scheduleSettingsSync("底仓明细已保存");
 }
 
-async function saveSettingsFromForm(event) {
-  event.preventDefault();
-  const minPrice = Math.max(0, Number(els.minPrice.value) || 0);
-  const maxPrice = Math.max(minPrice, Number(els.maxPrice.value) || DEFAULT_SETTINGS.maxPrice);
-  const lot = Math.max(1, Math.floor(Number(els.lot.value) || DEFAULT_SETTINGS.lot));
-  state.settings = {
-    ...state.settings,
-    minPrice,
-    maxPrice,
-    pickTime: DEFAULT_SETTINGS.pickTime,
-    lot,
-  };
-  state.settings.defaultPrompt = buildDefaultPrompt();
-  fillSettingsForm();
-  saveSettings();
-  render();
-  setStatus("选股设置已保存，正在同步");
-  await upsertRemoteSettings();
-  setStatus("选股设置已保存");
-}
-
 els.form.addEventListener("submit", upsertStockFromForm);
 els.clearForm.addEventListener("click", clearForm);
-els.settingsForm.addEventListener("submit", saveSettingsFromForm);
 els.refresh.addEventListener("click", refreshStocks);
 els.refreshDefaultPrompt.addEventListener("click", refreshDefaultPrompt);
 els.userRequirements.addEventListener("input", saveUserRequirements);
 
 loadLocalState();
-fillSettingsForm();
+fillHoldingFormDefaults();
 updateClock();
 render();
 initRemoteState();

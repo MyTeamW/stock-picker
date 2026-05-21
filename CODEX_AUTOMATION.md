@@ -10,7 +10,7 @@
    python scripts\read_codex_context.py --refresh-quotes
    ```
 
-2. 脚本会先刷新页面默认提示词，并把 `default_prompt` 写回 `picker_settings.defaultPrompt`。Codex 根据输出里的 `default_prompt`、`user_requirements`、`big_pool_stocks`、`big_pool_ranked_candidates`、`holding_stocks` 和当天行情自行分析，不直接照搬规则分数。
+2. 脚本会先刷新页面默认提示词，并把 `default_prompt` 写回 `picker_settings.defaultPrompt`。如果页面“我的要求”为空，默认使用 `价格区间 0.00 - 70.00 元；计划买入 1 手（100 股）。`。Codex 根据输出里的 `default_prompt`、`user_requirements`、`big_pool_stocks`、`big_pool_ranked_candidates`、`holding_stocks` 和当天行情自行分析，不直接照搬规则分数。
 
 3. Codex 生成两段结果 JSON：`buy_recommendation` 对应今日新买推荐，`holding_advice` 对应已持仓股票的操作建议，然后写入 Supabase：
 

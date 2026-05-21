@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>选股助手</title>
-    <link rel="stylesheet" href="./styles.css?v=20260520-3" />
+    <link rel="stylesheet" href="./styles.css?v=20260521-1" />
   </head>
   <body>
     <main class="shell">
@@ -44,14 +44,17 @@
           </div>
           <div class="prompt-stack">
             <label class="prompt-box">
-              <span>默认提示词（自动汇总两部分）</span>
-              <textarea id="defaultPromptOutput" rows="8" readonly></textarea>
-            </label>
-            <label class="prompt-box">
               <span>我的要求（可输入）</span>
               <textarea id="userRequirementsInput" rows="5" placeholder="例如：只做短线、不要追高；持仓股优先控制回撤。"></textarea>
             </label>
           </div>
+          <section class="pool-card" aria-label="股池列表">
+            <div class="pool-head">
+              <span>股池列表</span>
+              <span id="bigPoolCount">-- 只</span>
+            </div>
+            <div id="bigPoolList" class="pool-list">正在读取大池子...</div>
+          </section>
           <label class="result-box">
             <span>今日选股推荐</span>
             <div id="buyPickResult" class="pick-result">
@@ -71,36 +74,20 @@
 
         <section class="controls" aria-label="持仓股票和选股设置">
           <form id="stockForm" class="stock-form">
-            <label>
-              <span>股票代码</span>
-              <input id="codeInput" name="code" inputmode="numeric" autocomplete="off" placeholder="002716" />
-            </label>
-            <label>
-              <span>股票名称</span>
-              <input id="nameInput" name="name" autocomplete="off" placeholder="湖南白银" />
-            </label>
-            <label class="wide">
-              <span>备注</span>
-              <input id="remarkInput" name="remark" autocomplete="off" placeholder="关注原因、题材、风控备注" />
-            </label>
-            <button id="saveStockButton" class="primary" type="submit">添加股票</button>
-            <button id="clearFormButton" class="secondary" type="button">清空</button>
-          </form>
-
-          <form id="settingsForm" class="settings-form">
-            <label>
-              <span>最低价</span>
-              <input id="minPriceInput" name="minPrice" type="number" min="0" step="0.01" />
-            </label>
-            <label>
-              <span>最高价</span>
-              <input id="maxPriceInput" name="maxPrice" type="number" min="0" step="0.01" />
+            <label class="stock-query">
+              <span>股票代码/或股票名称</span>
+              <input id="stockQueryInput" name="stockQuery" autocomplete="off" placeholder="002716 或 湖南白银" />
             </label>
             <label>
               <span>买入量（手）</span>
-              <input id="lotInput" name="lot" type="number" min="1" step="1" />
+              <input id="buyLotsInput" name="buyLots" type="number" min="1" step="1" placeholder="1" />
             </label>
-            <button class="primary" type="submit">保存设置</button>
+            <label>
+              <span>买入价</span>
+              <input id="buyPriceInput" name="buyPrice" type="number" min="0" step="0.01" placeholder="63.00" />
+            </label>
+            <button id="saveStockButton" class="primary" type="submit">添加股票</button>
+            <button id="clearFormButton" class="secondary" type="button">清空</button>
           </form>
 
           <div class="setting-summary" id="settingSummary"></div>
@@ -147,6 +134,6 @@
       </tr>
     </template>
 
-    <script src="./app.js?v=20260520-3"></script>
+    <script src="./app.js?v=20260521-1"></script>
   </body>
 </html>

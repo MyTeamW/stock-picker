@@ -156,19 +156,14 @@ h3 {
   padding: 18px;
 }
 
-.stock-form,
-.settings-form {
+.stock-form {
   display: grid;
   gap: 12px;
   align-items: end;
 }
 
 .stock-form {
-  grid-template-columns: 150px 180px minmax(0, 1fr) auto auto;
-}
-
-.settings-form {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: minmax(220px, 1.4fr) 140px 140px auto auto;
 }
 
 label {
@@ -298,6 +293,68 @@ textarea:focus {
   gap: 12px;
 }
 
+.pool-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d7e7e4;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfa;
+}
+
+.pool-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.pool-list {
+  display: grid;
+  max-height: 184px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  overflow: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pool-item {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 9px;
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.pool-item:hover {
+  border-color: #b7d4cf;
+  color: var(--accent-strong);
+}
+
+.pool-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pool-code {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .pick-result {
   min-height: 58px;
   border: 1px solid #d7e7e4;
@@ -359,12 +416,16 @@ textarea:focus {
   line-height: 1.55;
 }
 
-.base-position-input {
-  min-height: 80px;
-  resize: vertical;
+.base-position-detail {
+  min-height: 22px;
   font-size: 13px;
   line-height: 1.35;
   text-align: left;
+  white-space: pre-wrap;
+}
+
+.base-position-detail.is-empty {
+  color: var(--muted);
 }
 
 .base-position-summary {
@@ -503,12 +564,11 @@ td:last-child {
 }
 
 @media (max-width: 1050px) {
-  .stock-form,
-  .settings-form {
+  .stock-form {
     grid-template-columns: 1fr 1fr;
   }
 
-  .wide,
+  .stock-query,
   .setting-summary {
     grid-column: 1 / -1;
   }
@@ -560,7 +620,6 @@ td:last-child {
   }
 
   .stock-form,
-  .settings-form,
   .assistant-actions {
     grid-template-columns: 1fr;
     width: 100%;

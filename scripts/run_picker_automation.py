@@ -26,6 +26,7 @@ RESULT_TABLE = env_or("PICKER_RESULT_TABLE", "picker_results")
 SETTINGS_ROW_KEY = "default"
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
+DEFAULT_USER_REQUIREMENTS = "价格区间 0.00 - 70.00 元；计划买入 1 手（100 股）。"
 
 
 @dataclass
@@ -313,7 +314,7 @@ def load_settings() -> dict[str, Any]:
     "pickTime": "14:30",
     "lot": 1,
     "defaultPrompt": "",
-    "userRequirements": "",
+    "userRequirements": DEFAULT_USER_REQUIREMENTS,
     "basePositions": {},
   }
   try:
@@ -326,7 +327,7 @@ def load_settings() -> dict[str, Any]:
   if not isinstance(settings.get("basePositions"), dict):
     settings["basePositions"] = {}
   settings["defaultPrompt"] = str(settings.get("defaultPrompt") or "")
-  settings["userRequirements"] = str(settings.get("userRequirements") or "")
+  settings["userRequirements"] = str(settings.get("userRequirements") or DEFAULT_USER_REQUIREMENTS)
   return settings
 
 
