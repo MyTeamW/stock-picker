@@ -448,10 +448,13 @@ table {
 
 th,
 td {
-  padding: 13px 12px;
   border-bottom: 1px solid var(--line);
   font-size: 14px;
   line-height: 1.35;
+}
+
+th {
+  padding: 13px 12px;
   vertical-align: middle;
 }
 
@@ -464,7 +467,9 @@ th {
 }
 
 td {
+  padding: 11px 12px;
   text-align: right;
+  vertical-align: top;
 }
 
 th:first-child,
@@ -477,6 +482,16 @@ td:nth-child(5) {
 th:first-child,
 td:first-child {
   width: 142px;
+}
+
+th:nth-child(2),
+td:nth-child(2) {
+  width: 96px;
+}
+
+th:nth-child(3),
+td:nth-child(3) {
+  width: 104px;
 }
 
 th:nth-child(4),
@@ -503,6 +518,13 @@ td:last-child {
 
 td:last-child {
   vertical-align: middle;
+}
+
+td:nth-child(2),
+td:nth-child(3),
+td:nth-child(4),
+td:nth-child(6) {
+  font-variant-numeric: tabular-nums;
 }
 
 .stock-name {
