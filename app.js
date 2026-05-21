@@ -223,13 +223,11 @@ function basePositionSummary(value) {
 function formatBasePosition(value) {
   const text = String(value || "").trim();
   if (!text) return "";
-  const inline = text.replace(/\s*\n+\s*/g, "；");
-  const summary = basePositionSummary(text);
-  return summary ? `${inline}（${summary}）` : inline;
+  return text.replace(/\s*\n+\s*/g, "；");
 }
 
 function buildBasePositionLine(price, lots) {
-  return `${money(price)} / ${formatLots(lots)}手`;
+  return `${formatLots(lots)}手 / ${money(price)}`;
 }
 
 function appendBasePosition(existing, nextLine) {
