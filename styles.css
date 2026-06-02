@@ -352,8 +352,10 @@ textarea:focus {
 
 .concept-chips {
   display: flex;
+  max-height: 128px;
   flex-wrap: wrap;
   gap: 8px;
+  overflow: auto;
 }
 
 .concept-chip {

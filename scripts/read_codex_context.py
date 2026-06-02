@@ -115,7 +115,7 @@ def format_base_position(value: Any) -> str:
 
 
 def normalize_concept(value: Any) -> str:
-  return re.sub(r"概念|板块|方向", "", str(value or "")).strip(" 　【】[]()（）")
+  return str(value or "").strip(" 　【】[]()（）")
 
 
 def concept_key(value: Any) -> str:
@@ -221,15 +221,31 @@ def eastmoney_f10_code(code: Any) -> str:
   return f"SZ{clean}"
 
 
+def concepts_from_operations_payload(payload: Any) -> list[str]:
+  if isinstance(payload, dict):
+    rows = payload.get("ssbk")
+    if isinstance(rows, list):
+      concepts = [
+        row.get("BOARD_NAME") or row.get("BOARDNAME") or row.get("NAME")
+        for row in rows
+        if isinstance(row, dict)
+      ]
+      parsed = parse_concepts(concepts)
+      if parsed:
+        return parsed
+  return concepts_from_payload(payload)
+
+
 def fetch_eastmoney_core_concepts(code: Any) -> list[str]:
   f10_code = eastmoney_f10_code(code)
   urls = [
-    f"https://emweb.eastmoney.com/PC_HSF10/CoreConception/PageAjax?code={f10_code}",
+    f"https://emweb.securities.eastmoney.com/PC_HSF10/OperationsRequired/PageAjax?code={f10_code}",
+    f"https://emweb.eastmoney.com/PC_HSF10/OperationsRequired/PageAjax?code={f10_code}",
     f"https://emweb.securities.eastmoney.com/PC_HSF10/CoreConception/PageAjax?code={f10_code}",
   ]
   for url in urls:
     try:
-      concepts = concepts_from_payload(request_json(url))
+      concepts = concepts_from_operations_payload(request_json(url))
       if concepts:
         return concepts
     except Exception:
@@ -537,6 +553,11 @@ def main() -> None:
 
   settings = load_settings()
   settings["pickTime"] = "14:30"
+  settings["bigPoolConcepts"] = {
+    str(stock.get("code")): parse_concepts(stock.get("concepts"))
+    for stock in big_pool_stocks
+    if stock.get("code") and parse_concepts(stock.get("concepts"))
+  }
   available_concepts = {concept_key(concept) for stock in big_pool_stocks for concept in parse_concepts(stock.get("concepts"))}
   filters = [concept for concept in concept_filters(settings) if concept_key(concept) in available_concepts]
   settings["conceptFilters"] = filters

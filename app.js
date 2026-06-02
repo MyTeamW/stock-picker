@@ -9,9 +9,20 @@ const SETTINGS_TABLE = "picker_settings";
 const RESULT_TABLE = "picker_results";
 const SETTINGS_ROW_KEY = "default";
 const DEFAULT_USER_REQUIREMENTS = "价格区间 0.00 - 70.00 元；计划买入 1 手（100 股）。";
-const CONCEPT_CACHE_KEY = "myteamw-stock-picker-concepts-v1";
+const CONCEPT_CACHE_KEY = "myteamw-stock-picker-concept-boards-v2";
 const CONCEPT_CACHE_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
-const CONCEPT_FETCH_CONCURRENCY = 4;
+const EASTMONEY_CLIST_HOSTS = [
+  "https://push2.eastmoney.com/api/qt/clist/get",
+  "https://4.push2.eastmoney.com/api/qt/clist/get",
+  "https://32.push2.eastmoney.com/api/qt/clist/get",
+  "https://74.push2.eastmoney.com/api/qt/clist/get",
+];
+const EASTMONEY_QUOTE_UT = "8dec03ba335b81bf4ebdf7b29ec27d15";
+const EASTMONEY_CONCEPT_BOARD_FS = "m:90 t:3";
+const CONCEPT_BOARD_PAGE_SIZE = 500;
+const CONCEPT_MEMBER_PAGE_SIZE = 500;
+const STATIC_CONCEPT_BOARDS_URL = "./concept-boards.json?v=20260602";
+const STATIC_STOCK_CONCEPTS_URL = "./stock-concepts.json?v=20260602";
 
 const DEFAULT_SETTINGS = {
   minPrice: 0,
@@ -22,6 +33,7 @@ const DEFAULT_SETTINGS = {
   userRequirements: DEFAULT_USER_REQUIREMENTS,
   basePositions: {},
   conceptFilters: [],
+  bigPoolConcepts: {},
 };
 
 const EMPTY_BUY_TEXT = "暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示。";
@@ -31,6 +43,8 @@ const state = {
   stocks: [],
   bigPool: [],
   conceptCache: {},
+  conceptBoards: [],
+  staticStockConcepts: {},
   conceptStatus: "idle",
   settings: { ...DEFAULT_SETTINGS },
   editingCode: "",
@@ -176,9 +190,19 @@ function displayStockName(stock) {
   return usefulStockName(stock && stock.name, stock && stock.code) || (stock && stock.code) || "";
 }
 
+function normalizeConceptMap(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(
+    Object.entries(source)
+      .map(([code, concepts]) => [normalizeCode(code), parseConceptArray(concepts)])
+      .filter(([code, concepts]) => code && concepts.length > 0),
+  );
+}
+
 function normalizeSettings(raw = {}) {
   const basePositions =
     raw && typeof raw.basePositions === "object" && !Array.isArray(raw.basePositions) ? raw.basePositions : {};
+  const bigPoolConcepts = normalizeConceptMap(raw.bigPoolConcepts);
   const conceptFilters = Array.isArray(raw.conceptFilters)
     ? raw.conceptFilters.map(normalizeConcept).filter(Boolean)
     : [];
@@ -197,13 +221,13 @@ function normalizeSettings(raw = {}) {
     userRequirements,
     basePositions: { ...basePositions },
     conceptFilters: uniqueConcepts(conceptFilters),
+    bigPoolConcepts,
   };
 }
 
 function normalizeConcept(value) {
   return String(value || "")
     .replace(/[【】[\]()（）]/gu, "")
-    .replace(/概念|板块|方向/gu, "")
     .trim();
 }
 
@@ -230,8 +254,14 @@ function stockConcepts(stock) {
 
 function stockMatchesConcepts(stock, concepts = state.settings.conceptFilters || []) {
   if (!concepts.length) return true;
+  const code = normalizeCode(stock && stock.code);
+  if (!code) return false;
   const stockKeys = new Set(stockConcepts(stock).map(conceptKey));
-  return concepts.every((concept) => stockKeys.has(conceptKey(concept)));
+  return concepts.every((concept) => {
+    const memberCodes = conceptMemberCodes(concept);
+    if (memberCodes.length > 0) return memberCodes.includes(code);
+    return stockKeys.has(conceptKey(concept));
+  });
 }
 
 function filteredBigPoolStocks() {
@@ -244,6 +274,24 @@ function selectedConceptBadges(stock) {
 }
 
 function conceptOptions() {
+  if (state.conceptBoards.length > 0) {
+    return state.conceptBoards
+      .map((board) => ({
+        concept: board.name,
+        count: conceptMatchedPoolCount(board.name),
+        boardCode: board.code,
+        loaded: Boolean(cachedConceptMemberEntry(board.name)),
+      }))
+      .sort((a, b) => {
+        const selectedKeys = new Set((state.settings.conceptFilters || []).map(conceptKey));
+        const aSelected = selectedKeys.has(conceptKey(a.concept));
+        const bSelected = selectedKeys.has(conceptKey(b.concept));
+        if (aSelected !== bSelected) return aSelected ? -1 : 1;
+        if (a.loaded !== b.loaded) return a.loaded ? -1 : 1;
+        if (a.count !== b.count) return b.count - a.count;
+        return a.concept.localeCompare(b.concept, "zh-CN");
+      });
+  }
   const counts = new Map();
   for (const stock of state.bigPool) {
     for (const concept of stockConcepts(stock)) {
@@ -260,7 +308,7 @@ function conceptOptions() {
 function sanitizeConceptFilters({ sync = false } = {}) {
   const available = new Set(conceptOptions().map((item) => conceptKey(item.concept)));
   const current = state.settings.conceptFilters || [];
-  if (available.size === 0) {
+  if (state.conceptBoards.length === 0 || available.size === 0) {
     return;
   }
   const filtered = current.filter((concept) => available.has(conceptKey(concept)));
@@ -545,12 +593,22 @@ function conceptCacheFresh(entry) {
   return Number.isFinite(fetchedAt) && Date.now() - fetchedAt < CONCEPT_CACHE_MAX_AGE;
 }
 
+function emptyConceptCache() {
+  return {
+    boards: { items: [], fetchedAt: "" },
+    members: {},
+  };
+}
+
 function loadConceptCache() {
   try {
     const parsed = JSON.parse(localStorage.getItem(CONCEPT_CACHE_KEY) || "{}");
-    state.conceptCache = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    state.conceptCache =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed) && parsed.boards && parsed.members
+        ? parsed
+        : emptyConceptCache();
   } catch {
-    state.conceptCache = {};
+    state.conceptCache = emptyConceptCache();
   }
 }
 
@@ -558,72 +616,115 @@ function saveConceptCache() {
   localStorage.setItem(CONCEPT_CACHE_KEY, JSON.stringify(state.conceptCache));
 }
 
-function cachedConcepts(code) {
-  const clean = normalizeCode(code);
-  const entry = state.conceptCache[clean];
-  if (!entry || !conceptCacheFresh(entry)) return [];
-  return parseConceptArray(entry.concepts);
+function normalizeConceptBoard(row) {
+  if (!row || typeof row !== "object") return null;
+  const code = String(row.code || row.boardCode || row.f12 || "").trim().toUpperCase();
+  const name = normalizeConcept(row.name || row.boardName || row.f14 || "");
+  if (!/^BK\d{4}$/iu.test(code) || !name) return null;
+  return {
+    code,
+    name,
+    changePercent: numberOrNull(row.changePercent ?? row.f3),
+  };
 }
 
-function applyCachedConcepts() {
-  state.bigPool = state.bigPool.map((stock) => {
-    const cached = cachedConcepts(stock.code);
-    return cached.length ? { ...stock, concepts: cached } : stock;
-  });
+function parseConceptBoards(rows) {
+  const seen = new Set();
+  const boards = [];
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const board = normalizeConceptBoard(row);
+    const key = conceptKey(board && board.name);
+    if (!board || !key || seen.has(key)) continue;
+    seen.add(key);
+    boards.push(board);
+  }
+  return boards;
+}
+
+function cachedConceptBoards() {
+  const entry = state.conceptCache.boards;
+  if (!entry || !conceptCacheFresh(entry)) return [];
+  return parseConceptBoards(entry.items);
+}
+
+function applyCachedConceptBoards() {
+  const boards = cachedConceptBoards();
+  if (boards.length > 0) state.conceptBoards = boards;
   sanitizeConceptFilters();
 }
 
-function eastmoneyF10Code(code) {
-  const clean = normalizeCode(code);
-  if (/^6|^9/.test(clean)) return `SH${clean}`;
-  if (/^4|^8/.test(clean)) return `BJ${clean}`;
-  return `SZ${clean}`;
+function applyConceptMapToBigPool(conceptMap) {
+  const source = normalizeConceptMap(conceptMap);
+  if (Object.keys(source).length === 0) return;
+  state.bigPool = state.bigPool.map((stock) => {
+    const code = normalizeCode(stock && stock.code);
+    const concepts = source[code];
+    return concepts && concepts.length > 0 ? { ...stock, concepts } : stock;
+  });
 }
 
-function collectStrings(value, bucket = []) {
-  if (typeof value === "string") {
-    bucket.push(value);
-    return bucket;
+async function loadStaticStockConcepts() {
+  try {
+    const response = await fetch(STATIC_STOCK_CONCEPTS_URL, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload = await response.json();
+    const rows = Array.isArray(payload && payload.stocks) ? payload.stocks : [];
+    const conceptMap = Object.fromEntries(
+      rows
+        .map((stock) => [normalizeCode(stock && stock.code), parseConceptArray(stock && stock.concepts)])
+        .filter(([code, concepts]) => code && concepts.length > 0),
+    );
+    state.staticStockConcepts = conceptMap;
+    applyConceptMapToBigPool(conceptMap);
+  } catch {
+    state.staticStockConcepts = {};
   }
-  if (Array.isArray(value)) {
-    value.forEach((item) => collectStrings(item, bucket));
-    return bucket;
-  }
-  if (value && typeof value === "object") {
-    Object.entries(value).forEach(([key, item]) => {
-      if (/board|concept|plate|theme|题材|概念|板块|所属/iu.test(key)) collectStrings(item, bucket);
-      else if (typeof item === "object") collectStrings(item, bucket);
-    });
-  }
-  return bucket;
 }
 
-function conceptsFromText(text) {
-  const normalized = String(text || "")
-    .replace(/<[^>]*>/gu, " ")
-    .replace(/&nbsp;|&#160;/giu, " ")
-    .replace(/&amp;/giu, "&")
-    .replace(/\s+/gu, " ")
-    .trim();
-  if (!normalized) return [];
-  const sections = [];
-  const boardMatch = normalized.match(/所属板块\s*[:：]?\s*([\s\S]*?)(?:要点[二三四五六七八九十]|经营范围|主营业务|$)/u);
-  if (boardMatch) sections.push(boardMatch[1]);
-  for (const match of normalized.matchAll(/(?:概念题材|所属概念|核心题材|所属板块)\s*[:：]\s*([^。；;]+)/gu)) {
-    sections.push(match[1]);
+function conceptBoardFor(concept) {
+  const key = conceptKey(concept);
+  if (!key) return null;
+  return state.conceptBoards.find((board) => conceptKey(board.name) === key) || null;
+}
+
+function cachedConceptMemberEntry(concept) {
+  const key = conceptKey(concept);
+  const members = state.conceptCache.members || {};
+  const entry = key ? members[key] : null;
+  if (!entry || !conceptCacheFresh(entry)) return null;
+  return {
+    ...entry,
+    codes: Array.isArray(entry.codes) ? entry.codes.map(normalizeCode).filter(Boolean) : [],
+  };
+}
+
+function conceptMemberCodes(concept) {
+  const entry = cachedConceptMemberEntry(concept);
+  return entry ? entry.codes : [];
+}
+
+function conceptMatchedPoolCount(concept) {
+  const codes = conceptMemberCodes(concept);
+  if (codes.length > 0) {
+    const members = new Set(codes);
+    return state.bigPool.reduce((count, stock) => count + (members.has(normalizeCode(stock && stock.code)) ? 1 : 0), 0);
   }
-  const source = sections.join(" ") || normalized;
-  return uniqueConcepts(
-    source
-      .split(/[、，,；;\/｜|\n\r\t ]+/u)
-      .map(normalizeConcept)
-      .filter((item) => item && item.length >= 2 && item.length <= 18)
-      .filter((item) => !/^(所属|板块|要点|核心题材|图片|暂无|无|--|最新价|涨跌幅)$/u.test(item)),
+  const key = conceptKey(concept);
+  return state.bigPool.reduce(
+    (count, stock) => count + (stockConcepts(stock).some((item) => conceptKey(item) === key) ? 1 : 0),
+    0,
   );
 }
 
-function conceptsFromPayload(payload) {
-  return uniqueConcepts(collectStrings(payload).flatMap(conceptsFromText));
+function conceptHasStockFallback(concept) {
+  const key = conceptKey(concept);
+  return state.bigPool.some((stock) => stockConcepts(stock).some((item) => conceptKey(item) === key));
+}
+
+function pendingSelectedConcepts() {
+  return (state.settings.conceptFilters || []).filter(
+    (concept) => conceptBoardFor(concept) && !cachedConceptMemberEntry(concept) && !conceptHasStockFallback(concept),
+  );
 }
 
 function parseStructuredResult(prompt) {
@@ -711,6 +812,7 @@ async function loadRemoteState() {
   } catch {
     state.settings = normalizeSettings(cachedSettings);
   }
+  applyConceptMapToBigPool(state.settings.bigPoolConcepts);
   state.stocks = attachBasePositions(state.stocks);
   saveStocks();
   saveSettings();
@@ -720,7 +822,8 @@ async function initRemoteState() {
   try {
     await loadRemoteState();
     loadConceptCache();
-    applyCachedConcepts();
+    applyCachedConceptBoards();
+    await loadStaticStockConcepts();
     state.remoteReady = true;
     fillHoldingFormDefaults();
     render();
@@ -791,6 +894,7 @@ async function upsertRemoteSettings() {
           userRequirements: state.settings.userRequirements || DEFAULT_USER_REQUIREMENTS,
           basePositions: state.settings.basePositions || {},
           conceptFilters: state.settings.conceptFilters || [],
+          bigPoolConcepts: state.settings.bigPoolConcepts || {},
         },
       }),
   });
@@ -829,92 +933,160 @@ function jsonp(url, callbackParam = "cb") {
   });
 }
 
-async function fetchJsonMaybe(url) {
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const text = await response.text();
-  if (!text.trim()) return null;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+function eastmoneyClistUrl(host, params = {}) {
+  const url = new URL(host);
+  Object.entries({
+    pn: 1,
+    pz: 20,
+    po: 1,
+    np: 1,
+    fltt: 2,
+    invt: 2,
+    fid: "f3",
+    fields: "f12,f14,f3",
+    ut: EASTMONEY_QUOTE_UT,
+    _: Date.now(),
+    ...params,
+  }).forEach(([key, value]) => url.searchParams.set(key, String(value)));
+  return url.toString();
 }
 
-async function fetchEastmoneyCoreConcepts(code) {
-  const f10Code = eastmoneyF10Code(code);
-  const urls = [
-    `https://emweb.eastmoney.com/PC_HSF10/CoreConception/PageAjax?code=${encodeURIComponent(f10Code)}`,
-    `https://emweb.securities.eastmoney.com/PC_HSF10/CoreConception/PageAjax?code=${encodeURIComponent(f10Code)}`,
-    `https://emweb.eastmoney.com/PC_HSF10/CoreConception/Index?code=${encodeURIComponent(f10Code)}&type=web`,
-  ];
-  for (const url of urls) {
+async function eastmoneyClistJsonp(params) {
+  let lastError = null;
+  for (const host of EASTMONEY_CLIST_HOSTS) {
     try {
-      const payload = await fetchJsonMaybe(url);
-      const concepts = typeof payload === "string" ? conceptsFromText(payload) : conceptsFromPayload(payload);
-      if (concepts.length > 0) return concepts;
-    } catch {
-      // Try the next F10 host/shape. CORS or host changes should not break the page.
+      return await jsonp(eastmoneyClistUrl(host, params));
+    } catch (error) {
+      lastError = error;
     }
   }
-  return [];
+  throw lastError || new Error("东方财富行情接口不可用");
 }
 
-async function fetchStockConcepts(stock) {
-  const existing = stockConcepts(stock);
-  if (existing.length > 0) return existing;
-  const cached = cachedConcepts(stock.code);
-  if (cached.length > 0) return cached;
-  return fetchEastmoneyCoreConcepts(stock.code);
-}
-
-async function refreshBigPoolConcepts({ force = false } = {}) {
-  if (!state.bigPool.length) return;
-  const candidates = state.bigPool.filter((stock) => {
-    if (!stock || !stock.code) return false;
-    if (!force && stockConcepts(stock).length > 0) return false;
-    if (!force && cachedConcepts(stock.code).length > 0) return false;
-    return true;
+async function fetchEastmoneyConceptBoards() {
+  const payload = await eastmoneyClistJsonp({
+    pn: 1,
+    pz: CONCEPT_BOARD_PAGE_SIZE,
+    po: 1,
+    fid: "f3",
+    fs: EASTMONEY_CONCEPT_BOARD_FS,
+    fields: "f12,f14,f3",
   });
-  if (candidates.length === 0) {
-    applyCachedConcepts();
-    render();
-    return;
+  const rows = payload && payload.data && Array.isArray(payload.data.diff) ? payload.data.diff : [];
+  return parseConceptBoards(rows);
+}
+
+async function fetchLocalConceptBoards() {
+  const response = await fetch(STATIC_CONCEPT_BOARDS_URL, { cache: "no-store" });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const payload = await response.json();
+  return parseConceptBoards(payload && payload.boards);
+}
+
+async function fetchEastmoneyBoardMembers(boardCode) {
+  const code = String(boardCode || "").trim().toUpperCase();
+  if (!/^BK\d{4}$/iu.test(code)) return [];
+  const members = [];
+  let total = 0;
+  let page = 1;
+
+  while (page <= 8) {
+    const payload = await eastmoneyClistJsonp({
+      pn: page,
+      pz: CONCEPT_MEMBER_PAGE_SIZE,
+      po: 1,
+      fid: "f3",
+      fs: `b:${code}`,
+      fields: "f12,f13,f14,f2,f3",
+    });
+    const data = payload && payload.data ? payload.data : {};
+    const rows = Array.isArray(data.diff) ? data.diff : [];
+    total = Number(data.total) || total || rows.length;
+    for (const row of rows) {
+      const stockCode = normalizeCode(row && row.f12);
+      if (stockCode) members.push(stockCode);
+    }
+    if (members.length >= total || rows.length < CONCEPT_MEMBER_PAGE_SIZE) break;
+    page += 1;
+  }
+
+  return [...new Set(members)];
+}
+
+async function refreshConceptBoards({ force = false } = {}) {
+  if (!force) {
+    applyCachedConceptBoards();
+    if (state.conceptBoards.length > 0) {
+      state.conceptStatus = "ready";
+      render();
+      return;
+    }
   }
 
   state.conceptStatus = "loading";
   renderConceptFilter();
-  let cursor = 0;
-  async function worker() {
-    while (cursor < candidates.length) {
-      const stock = candidates[cursor];
-      cursor += 1;
-      const code = normalizeCode(stock.code);
-      try {
-        const concepts = force ? await fetchEastmoneyCoreConcepts(stock.code) : await fetchStockConcepts(stock);
-        state.conceptCache[code] = {
-          concepts,
-          fetchedAt: new Date().toISOString(),
-          source: concepts.length ? "eastmoney-f10-core-conception" : "unavailable",
-        };
-        if (concepts.length > 0) {
-          state.bigPool = state.bigPool.map((item) => (normalizeCode(item.code) === code ? { ...item, concepts } : item));
-        }
-      } catch {
-        state.conceptCache[code] = {
-          concepts: [],
-          fetchedAt: new Date().toISOString(),
-          source: "unavailable",
-        };
-      }
-    }
+  let boards = [];
+  let source = "eastmoney-concept-boards";
+  try {
+    boards = await fetchEastmoneyConceptBoards();
+  } catch {
+    boards = [];
   }
-  await Promise.all(Array.from({ length: Math.min(CONCEPT_FETCH_CONCURRENCY, candidates.length) }, worker));
+  if (boards.length === 0) {
+    boards = await fetchLocalConceptBoards();
+    source = "local-eastmoney-concept-boards";
+  }
+  state.conceptBoards = boards;
+  state.conceptCache.boards = {
+    items: boards,
+    fetchedAt: new Date().toISOString(),
+    source,
+  };
   saveConceptCache();
-  applyCachedConcepts();
   sanitizeConceptFilters({ sync: true });
+  state.conceptStatus = boards.length > 0 ? "ready" : "error";
+  render();
+}
+
+async function ensureConceptMembers(concepts, { force = false } = {}) {
+  const selected = uniqueConcepts(concepts);
+  if (selected.length === 0) return;
+  if (state.conceptBoards.length === 0) await refreshConceptBoards();
+
+  const missing = selected.filter((concept) => {
+    const board = conceptBoardFor(concept);
+    if (!board) return false;
+    if (!force && conceptHasStockFallback(concept)) return false;
+    return force || !cachedConceptMemberEntry(concept);
+  });
+  if (missing.length === 0) return;
+
+  state.conceptStatus = "members-loading";
+  render();
+  for (const concept of missing) {
+    const board = conceptBoardFor(concept);
+    if (!board) continue;
+    const codes = await fetchEastmoneyBoardMembers(board.code);
+    state.conceptCache.members[conceptKey(board.name)] = {
+      concept: board.name,
+      boardCode: board.code,
+      codes,
+      fetchedAt: new Date().toISOString(),
+      source: "eastmoney-concept-board-members",
+    };
+    saveConceptCache();
+  }
   state.conceptStatus = "ready";
   render();
+}
+
+async function ensureSelectedConceptMembers({ force = false } = {}) {
+  await ensureConceptMembers(state.settings.conceptFilters || [], { force });
+}
+
+async function refreshBigPoolConcepts({ force = false } = {}) {
+  await refreshConceptBoards({ force });
+  await ensureSelectedConceptMembers({ force });
 }
 
 async function resolveStockByName(name) {
@@ -1199,8 +1371,13 @@ function renderBigPoolList() {
   renderConceptFilter();
   const total = state.bigPool.filter((stock) => stock && stock.code).length;
   const selectedConcepts = state.settings.conceptFilters || [];
+  const pendingConcepts = pendingSelectedConcepts();
   const stocks = filteredBigPoolStocks();
   els.bigPoolCount.textContent = selectedConcepts.length ? `${stocks.length}/${total} 只` : `${total} 只`;
+  if (selectedConcepts.length > 0 && pendingConcepts.length > 0) {
+    els.bigPoolList.textContent = `正在读取 ${pendingConcepts.join(" + ")} 成分股...`;
+    return;
+  }
   if (stocks.length === 0) {
     els.bigPoolList.textContent = selectedConcepts.length
       ? `没有同时命中 ${selectedConcepts.join(" + ")} 的股票`
@@ -1235,27 +1412,30 @@ function renderConceptFilter() {
   const options = conceptOptions();
   if (options.length === 0) {
     els.conceptChips.innerHTML = `<span class="concept-empty">${
-      state.conceptStatus === "loading" ? "正在读取 F10 概念标签..." : "暂无可用概念标签"
+      state.conceptStatus === "loading" ? "正在读取东方财富概念板块..." : "暂无可用概念标签"
     }</span>`;
   } else {
     els.conceptChips.innerHTML = options
-      .map(({ concept, count }) => {
+      .map(({ concept, count, loaded }) => {
         const active = selected.some((item) => conceptKey(item) === conceptKey(concept));
         return `<button class="concept-chip${active ? " is-active" : ""}" type="button" data-concept="${escapeHtml(
           concept,
         )}" aria-pressed="${active}">
           <span>${escapeHtml(concept)}</span>
-          <small>${count}</small>
+          ${loaded || count > 0 ? `<small>${count}</small>` : ""}
         </button>`;
       })
       .join("");
   }
   els.clearConceptFilter.hidden = selected.length === 0;
+  const pendingConcepts = pendingSelectedConcepts();
   els.conceptFilterSummary.textContent = selected.length
-    ? `已锁定：${selected.join(" + ")}；列表仅显示 F10 标签同时命中的股票。`
+    ? pendingConcepts.length > 0
+      ? `已锁定：${selected.join(" + ")}；正在读取 ${pendingConcepts.join(" + ")} 的成分股。`
+      : `已锁定：${selected.join(" + ")}；列表仅显示东方财富概念板块成分股同时命中的股票。`
     : state.conceptStatus === "loading"
-      ? "正在从东方财富 F10 核心题材读取所属板块标签。"
-      : "未锁定概念，显示全部股池。概念来自个股 F10 所属板块。";
+      ? "正在从东方财富读取概念板块列表。"
+      : "未锁定概念，显示全部股池。概念来自东方财富概念板块。";
 }
 
 function renderResultBlock(container, section, emptyText) {
@@ -1612,7 +1792,7 @@ function saveBasePosition(code, value) {
   scheduleSettingsSync("底仓明细已保存");
 }
 
-function toggleConceptFilter(concept) {
+async function toggleConceptFilter(concept) {
   const normalized = normalizeConcept(concept);
   if (!normalized) return;
   const selected = state.settings.conceptFilters || [];
@@ -1621,6 +1801,11 @@ function toggleConceptFilter(concept) {
   state.settings.conceptFilters = exists
     ? selected.filter((item) => conceptKey(item) !== key)
     : uniqueConcepts([...selected, normalized]);
+  state.settings.defaultPrompt = buildDefaultPrompt();
+  saveSettings();
+  render();
+  scheduleSettingsSync("概念筛选已保存");
+  await ensureSelectedConceptMembers();
   state.settings.defaultPrompt = buildDefaultPrompt();
   saveSettings();
   render();
@@ -1637,9 +1822,12 @@ function clearConceptFilters() {
 }
 
 async function refreshConceptsFromButton() {
-  setStatus("正在刷新 F10 概念标签");
+  setStatus("正在刷新东方财富概念板块");
   await refreshBigPoolConcepts({ force: true });
-  setStatus("F10 概念标签已刷新");
+  state.settings.defaultPrompt = buildDefaultPrompt();
+  saveSettings();
+  render();
+  setStatus("东方财富概念板块已刷新");
 }
 
 els.form.addEventListener("submit", upsertStockFromForm);
@@ -1650,11 +1838,15 @@ els.userRequirements.addEventListener("input", saveUserRequirements);
 els.conceptChips.addEventListener("click", (event) => {
   const button = event.target.closest("[data-concept]");
   if (!button) return;
-  toggleConceptFilter(button.dataset.concept);
+  toggleConceptFilter(button.dataset.concept).catch(() => {
+    state.conceptStatus = "error";
+    render();
+    setStatus("概念成分股读取失败");
+  });
 });
 els.clearConceptFilter.addEventListener("click", clearConceptFilters);
 els.refreshConcepts.addEventListener("click", () => {
-  refreshConceptsFromButton().catch(() => setStatus("F10 概念标签刷新失败"));
+  refreshConceptsFromButton().catch(() => setStatus("东方财富概念板块刷新失败"));
 });
 
 loadLocalState();
