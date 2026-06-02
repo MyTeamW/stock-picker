@@ -24,6 +24,7 @@ try:
     normalize_percent_value,
     percent,
     plain_number,
+    request_json,
     refresh_stocks,
     score_stock,
     supabase,
@@ -41,6 +42,7 @@ except ModuleNotFoundError:
     normalize_percent_value,
     percent,
     plain_number,
+    request_json,
     refresh_stocks,
     score_stock,
     supabase,
@@ -112,6 +114,157 @@ def format_base_position(value: Any) -> str:
   return re.sub(r"\s*\n+\s*", "；", text)
 
 
+def normalize_concept(value: Any) -> str:
+  return re.sub(r"概念|板块|方向", "", str(value or "")).strip(" 　【】[]()（）")
+
+
+def concept_key(value: Any) -> str:
+  return re.sub(r"\s+", "", normalize_concept(value).lower())
+
+
+def concept_filters(settings: dict[str, Any]) -> list[str]:
+  raw = settings.get("conceptFilters")
+  if not isinstance(raw, list):
+    return []
+  seen: set[str] = set()
+  filters: list[str] = []
+  for item in raw:
+    concept = normalize_concept(item)
+    key = concept_key(concept)
+    if not concept or key in seen:
+      continue
+    seen.add(key)
+    filters.append(concept)
+  return filters
+
+
+def parse_concepts(value: Any) -> list[str]:
+  if isinstance(value, list):
+    raw_items = value
+  elif isinstance(value, str):
+    text = value.strip()
+    if not text:
+      raw_items = []
+    else:
+      try:
+        parsed = json.loads(text)
+      except json.JSONDecodeError:
+        parsed = None
+      raw_items = parsed if isinstance(parsed, list) else re.split(r"[、，,；;/｜|\n\r\t ]+", text)
+  else:
+    raw_items = []
+  seen: set[str] = set()
+  concepts: list[str] = []
+  for item in raw_items:
+    concept = normalize_concept(item)
+    key = concept_key(concept)
+    if not concept or key in seen:
+      continue
+    seen.add(key)
+    concepts.append(concept)
+  return concepts
+
+
+def collect_strings(value: Any, bucket: list[str] | None = None) -> list[str]:
+  bucket = bucket or []
+  if isinstance(value, str):
+    bucket.append(value)
+  elif isinstance(value, list):
+    for item in value:
+      collect_strings(item, bucket)
+  elif isinstance(value, dict):
+    for key, item in value.items():
+      if re.search(r"board|concept|plate|theme|题材|概念|板块|所属", str(key), re.I):
+        collect_strings(item, bucket)
+      elif isinstance(item, (dict, list)):
+        collect_strings(item, bucket)
+  return bucket
+
+
+def concepts_from_text(text: Any) -> list[str]:
+  normalized = re.sub(r"<[^>]*>", " ", str(text or ""))
+  normalized = re.sub(r"&nbsp;|&#160;", " ", normalized, flags=re.I)
+  normalized = re.sub(r"&amp;", "&", normalized, flags=re.I)
+  normalized = re.sub(r"\s+", " ", normalized).strip()
+  if not normalized:
+    return []
+  sections: list[str] = []
+  board_match = re.search(r"所属板块\s*[:：]?\s*([\s\S]*?)(?:要点[二三四五六七八九十]|经营范围|主营业务|$)", normalized)
+  if board_match:
+    sections.append(board_match.group(1))
+  sections.extend(
+    match.group(1)
+    for match in re.finditer(r"(?:概念题材|所属概念|核心题材|所属板块)\s*[:：]\s*([^。；;]+)", normalized)
+  )
+  source = " ".join(sections) or normalized
+  concepts = re.split(r"[、，,；;/｜|\n\r\t ]+", source)
+  return [
+    concept
+    for concept in parse_concepts(concepts)
+    if 2 <= len(concept) <= 18 and concept not in {"所属", "板块", "要点", "核心题材", "图片", "暂无", "--"}
+  ]
+
+
+def concepts_from_payload(payload: Any) -> list[str]:
+  concepts: list[str] = []
+  for text in collect_strings(payload):
+    concepts.extend(concepts_from_text(text))
+  return parse_concepts(concepts)
+
+
+def eastmoney_f10_code(code: Any) -> str:
+  clean = re.sub(r"\D", "", str(code or ""))[:6]
+  if clean.startswith(("6", "9")):
+    return f"SH{clean}"
+  if clean.startswith(("4", "8")):
+    return f"BJ{clean}"
+  return f"SZ{clean}"
+
+
+def fetch_eastmoney_core_concepts(code: Any) -> list[str]:
+  f10_code = eastmoney_f10_code(code)
+  urls = [
+    f"https://emweb.eastmoney.com/PC_HSF10/CoreConception/PageAjax?code={f10_code}",
+    f"https://emweb.securities.eastmoney.com/PC_HSF10/CoreConception/PageAjax?code={f10_code}",
+  ]
+  for url in urls:
+    try:
+      concepts = concepts_from_payload(request_json(url))
+      if concepts:
+        return concepts
+    except Exception:
+      continue
+  return []
+
+
+def attach_big_pool_concepts(stocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+  attached: list[dict[str, Any]] = []
+  for stock in stocks:
+    concepts = parse_concepts(
+      stock.get("concepts")
+      or stock.get("concept_tags")
+      or stock.get("conceptTags")
+      or stock.get("tags")
+      or stock.get("boards")
+    )
+    if not concepts:
+      concepts = fetch_eastmoney_core_concepts(stock.get("code"))
+      time.sleep(0.05)
+    attached.append({**stock, "concepts": concepts})
+  return attached
+
+
+def stock_matches_concepts(stock: dict[str, Any], filters: list[str]) -> bool:
+  if not filters:
+    return True
+  stock_keys = {concept_key(concept) for concept in parse_concepts(stock.get("concepts"))}
+  return all(concept_key(concept) in stock_keys for concept in filters)
+
+
+def filter_big_pool_by_concepts(stocks: list[dict[str, Any]], filters: list[str]) -> list[dict[str, Any]]:
+  return [stock for stock in stocks if stock_matches_concepts(stock, filters)]
+
+
 def normalize_stock(stock: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, Any]:
   settings = settings or {}
   quote_date = str(stock.get("quote_date") or "")
@@ -152,6 +305,8 @@ def normalize_big_pool_stock(stock: dict[str, Any]) -> dict[str, Any]:
     "name": useful_stock_name(stock.get("name"), stock.get("code")),
     "remark": stock.get("remark") or "",
     "recommender": stock.get("recommender") or "",
+    "business": stock.get("business") or "",
+    "concepts": parse_concepts(stock.get("concepts")),
     "start_date": stock.get("start_date") or "",
     "start_price": start_price,
     "high_price": high_price,
@@ -220,7 +375,7 @@ def big_pool_line(stock: dict[str, Any], index: int) -> str:
     f"高位回撤{direct_percent(normalized.get('high_drawdown_percent'))}，"
     f"今日涨跌幅{percent(normalized.get('change_percent'))}，"
     f"更新时间{normalized.get('quote_date') or normalized.get('last_quote_date') or '-'}，"
-    f"备注：{normalized.get('remark') or normalized.get('recommender') or '无'}"
+    f"备注：{normalized.get('remark') or normalized.get('recommender') or normalized.get('business') or '无'}"
   )
 
 
@@ -292,6 +447,7 @@ def build_default_prompt(
   big_pool_ranked: list[tuple[float, dict[str, Any]]],
   big_pool_stocks: list[dict[str, Any]],
   holdings: list[dict[str, Any]],
+  total_big_pool_count: int,
 ) -> str:
   big_candidate_source = [stock for _, stock in big_pool_ranked[:12]] or big_pool_stocks[:12]
   big_candidates = "\n".join(big_pool_line(stock, index) for index, stock in enumerate(big_candidate_source, 1))
@@ -301,12 +457,19 @@ def build_default_prompt(
   holding_candidates = "\n".join(candidate_line(stock, index, settings) for index, stock in enumerate(holdings, 1))
   if not holding_candidates:
     holding_candidates = "暂无已填写底仓的持仓股票。"
+  filters = concept_filters(settings)
+  concept_text = (
+    f"当前锁定概念：{' + '.join(filters)}；大池中同时命中 {len(big_pool_stocks)}/{total_big_pool_count} 只。"
+    if filters
+    else "当前未锁定概念，默认从全部大池中选择。"
+  )
 
   return (
     "请你作为谨慎的 A 股短线助手，今天要分开完成两个部分。\n\n"
     f"今日选股推荐：从大池子（{TRACKER_URL}）中只推荐 1 只今日买入观察标的；"
     "以交易日 14:30 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，"
     "但不要机械照搬页面排序。\n\n"
+    f"{concept_text}\n\n"
     "持仓操作建议：只对已经持仓的股票给后续操作建议；是否持仓以“底仓明细”非空为准，"
     "未填写底仓明细的股票不当作持仓处理。\n\n"
     f"我的设置：价格区间 {money(settings.get('minPrice'))} - {money(settings.get('maxPrice'))} 元；"
@@ -316,7 +479,7 @@ def build_default_prompt(
     f"已持仓股票：\n{holding_candidates}"
     "\n\n请输出两部分：第一部分是今日新买推荐，必须包含推荐股票、推荐理由、风险、理想买点、"
     "止损位、短线目标区间和买入量提醒；第二部分是每只持仓股的后续操作建议，明确持有、减仓、"
-    "观察或止损条件。所有内容都要写明不构成投资建议。"
+    "观察或止损条件。内容要聚焦结论、风险和触发条件，不要添加固定结尾套话。"
   )
 
 
@@ -340,7 +503,7 @@ def persist_default_prompt(settings: dict[str, Any], default_prompt: str) -> Non
 def build_writer_schema() -> dict[str, str]:
   return {
     "title": "兼容字段，展示今日选股推荐标题，例如 今日推荐：某某（000000）",
-    "summary": "兼容字段，1-2 句概括今日选股推荐结论，需写明不构成投资建议",
+    "summary": "兼容字段，1-2 句概括今日选股推荐结论",
     "rationale": "兼容字段，字符串数组，列出今日选股推荐选择依据",
     "risks": "兼容字段，字符串数组，列出今日选股推荐主要风险和放弃条件",
     "action": "兼容字段，今日选股推荐短线操作建议，包含不追高、理想买点、止损、目标、买入量提醒",
@@ -370,12 +533,17 @@ def main() -> None:
   if refresh_quotes:
     stocks, quote_errors = refresh_stocks(holding_rows)
     big_pool_stocks, big_pool_quote_errors = refresh_big_pool_quotes(big_pool_rows)
+  big_pool_stocks = attach_big_pool_concepts(big_pool_stocks)
 
   settings = load_settings()
   settings["pickTime"] = "14:30"
+  available_concepts = {concept_key(concept) for stock in big_pool_stocks for concept in parse_concepts(stock.get("concepts"))}
+  filters = [concept for concept in concept_filters(settings) if concept_key(concept) in available_concepts]
+  settings["conceptFilters"] = filters
   holding_list = held_stocks(stocks, settings)
+  locked_big_pool_stocks = filter_big_pool_by_concepts(big_pool_stocks, filters)
   big_pool_ranked = sorted(
-    [(score_big_pool_stock(stock, settings), stock) for stock in big_pool_stocks],
+    [(score_big_pool_stock(stock, settings), stock) for stock in locked_big_pool_stocks],
     key=lambda item: item[0],
     reverse=True,
   )
@@ -386,7 +554,13 @@ def main() -> None:
     reverse=True,
   )
   holding_ranked = [(score, stock) for score, stock in holding_ranked if score > 0]
-  default_prompt = build_default_prompt(settings, big_pool_ranked, big_pool_stocks, holding_list)
+  default_prompt = build_default_prompt(
+    settings,
+    big_pool_ranked,
+    locked_big_pool_stocks,
+    holding_list,
+    len(big_pool_stocks),
+  )
   persist_default_prompt(settings, default_prompt)
   settings["defaultPrompt"] = default_prompt
   user_requirements = str(settings.get("userRequirements") or "")
@@ -403,7 +577,10 @@ def main() -> None:
       "results": RESULT_TABLE,
     },
     "settings": settings,
+    "concept_filters": filters,
+    "locked_big_pool_count": len(locked_big_pool_stocks),
     "big_pool_stocks": [normalize_big_pool_stock(stock) for stock in big_pool_stocks],
+    "locked_big_pool_stocks": [normalize_big_pool_stock(stock) for stock in locked_big_pool_stocks],
     "big_pool_ranked_candidates": [
       {"score": round(score, 2), **normalize_big_pool_stock(stock)} for score, stock in big_pool_ranked[:20]
     ],

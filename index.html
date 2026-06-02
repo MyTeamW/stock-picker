@@ -53,6 +53,17 @@
               <span>股池列表（https://myteamw.github.io/tracker/）</span>
               <span id="bigPoolCount">-- 只</span>
             </div>
+            <div class="concept-filter" aria-label="概念筛选">
+              <div class="concept-filter-head">
+                <span>概念筛选</span>
+                <div class="concept-filter-actions">
+                  <button id="refreshConceptsButton" class="link-button" type="button">刷新概念</button>
+                  <button id="clearConceptFilterButton" class="link-button" type="button">清空</button>
+                </div>
+              </div>
+              <div id="conceptChips" class="concept-chips"></div>
+              <div id="conceptFilterSummary" class="concept-filter-summary">未锁定概念，显示全部股池。</div>
+            </div>
             <div id="bigPoolList" class="pool-list">正在读取大池子...</div>
           </section>
           <label class="result-box">

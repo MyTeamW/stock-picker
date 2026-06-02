@@ -240,6 +240,18 @@ textarea:focus {
   opacity: 0.72;
 }
 
+.link-button {
+  min-height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--accent-strong);
+  font-size: 12px;
+}
+
+.link-button:hover {
+  background: #e6f4f1;
+}
+
 .delete {
   min-height: 32px;
   padding: 0 10px;
@@ -312,6 +324,83 @@ textarea:focus {
   font-weight: 750;
 }
 
+.concept-filter {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.concept-filter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.concept-filter-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.concept-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.concept-chip {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #fbfcfa;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.concept-chip small {
+  margin-left: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.concept-chip:hover {
+  border-color: #b7d4cf;
+  color: var(--accent-strong);
+}
+
+.concept-chip.is-active {
+  border-color: var(--accent);
+  background: #e6f4f1;
+  color: var(--accent-strong);
+}
+
+.concept-chip.is-active small {
+  color: var(--accent-strong);
+}
+
+.concept-empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.concept-filter-summary {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .pool-list {
   display: grid;
   max-height: 184px;
@@ -324,8 +413,8 @@ textarea:focus {
 
 .pool-item {
   display: flex;
-  min-height: 36px;
-  align-items: center;
+  min-height: 46px;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
   border: 1px solid var(--line);
@@ -334,6 +423,12 @@ textarea:focus {
   background: var(--surface);
   color: var(--ink);
   text-decoration: none;
+}
+
+.pool-main {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
 }
 
 .pool-item:hover {
@@ -347,6 +442,22 @@ textarea:focus {
   font-weight: 750;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.pool-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.pool-tag {
+  border-radius: 999px;
+  padding: 2px 6px;
+  background: #e6f4f1;
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 750;
+  line-height: 1.2;
 }
 
 .pool-code {

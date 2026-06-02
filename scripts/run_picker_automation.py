@@ -316,6 +316,7 @@ def load_settings() -> dict[str, Any]:
     "defaultPrompt": "",
     "userRequirements": DEFAULT_USER_REQUIREMENTS,
     "basePositions": {},
+    "conceptFilters": [],
   }
   try:
     rows = supabase(f"{SETTINGS_TABLE}?select=value&key=eq.{SETTINGS_ROW_KEY}&limit=1")
@@ -326,6 +327,8 @@ def load_settings() -> dict[str, Any]:
   settings["pickTime"] = "14:30"
   if not isinstance(settings.get("basePositions"), dict):
     settings["basePositions"] = {}
+  if not isinstance(settings.get("conceptFilters"), list):
+    settings["conceptFilters"] = []
   settings["defaultPrompt"] = str(settings.get("defaultPrompt") or "")
   settings["userRequirements"] = str(settings.get("userRequirements") or DEFAULT_USER_REQUIREMENTS)
   return settings
@@ -411,7 +414,7 @@ def build_result(stocks: list[dict[str, Any]], settings: dict[str, Any], errors:
       "trade_date": today,
       "generated_at": now_china().isoformat(),
       "title": "今日未生成观察候选",
-      "summary": f"股票池 {len(stocks)} 只，未找到同时满足价格、行情和风险过滤的标的；不构成投资建议。",
+      "summary": f"股票池 {len(stocks)} 只，未找到同时满足价格、行情和风险过滤的标的。",
       "rationale": ["价格区间、ST/退市风险、行情完整度过滤后无合格候选"],
       "risks": ["信息不足时不强行推荐", f"行情刷新失败 {len(errors)} 只"],
       "action": "今天不新开观察仓，先维护股票池和行情质量。",
@@ -435,7 +438,7 @@ def build_result(stocks: list[dict[str, Any]], settings: dict[str, Any], errors:
     "trade_date": today,
     "generated_at": now_china().isoformat(),
     "title": f"今日观察候选：{stock.get('name')}（{stock.get('code')}）",
-    "summary": f"基于独立股票池 {len(stocks)} 只，规则评分 {score:.1f}；仅作观察，不构成投资建议。",
+    "summary": f"基于独立股票池 {len(stocks)} 只，规则评分 {score:.1f}；仅作观察。",
     "rationale": [
       f"现价 {money(price)} 元，位于 {money(settings['minPrice'])}-{money(settings['maxPrice'])} 元区间，计划买入量 {int(settings.get('lot') or 1)} 手",
       f"日内高/低 {money(stock.get('high'))}/{money(stock.get('low'))}，涨跌幅 {percent(stock.get('change_percent'))}，成交额 {money((stock.get('turnover') or 0) / 100000000)} 亿",
@@ -452,7 +455,7 @@ def build_result(stocks: list[dict[str, Any]], settings: dict[str, Any], errors:
       "请你作为谨慎的 A 股分析助手，每个交易日从股票池中推荐 1 只今日买入观察标的。"
       f"页面本地排序第一名：{stock.get('name')}（{stock.get('code')}），现价 {money(price)} 元，"
       f"涨跌幅 {percent(stock.get('change_percent'))}，日内高/低 {money(stock.get('high'))}/{money(stock.get('low'))}。"
-      "请根据完整股票池和今日行情独立给出最终推荐、风险点、仓位提醒，并明确不构成投资建议。"
+      "请根据完整股票池和今日行情独立给出最终推荐、风险点、仓位提醒，不要添加固定结尾套话。"
     ),
     "candidate_code": stock.get("code"),
     "candidate_name": stock.get("name"),
