@@ -350,6 +350,25 @@ textarea:focus {
   gap: 6px;
 }
 
+.concept-search {
+  width: min(168px, 38vw);
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.concept-search:focus {
+  border-color: var(--accent);
+  outline: 2px solid rgba(49, 128, 115, 0.14);
+  outline-offset: 1px;
+}
+
 .concept-chips {
   display: flex;
   max-height: 128px;

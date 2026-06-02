@@ -70,6 +70,7 @@ const els = {
   bigPoolCount: document.querySelector("#bigPoolCount"),
   conceptChips: document.querySelector("#conceptChips"),
   conceptFilterSummary: document.querySelector("#conceptFilterSummary"),
+  conceptSearch: document.querySelector("#conceptSearchInput"),
   clearConceptFilter: document.querySelector("#clearConceptFilterButton"),
   refreshConcepts: document.querySelector("#refreshConceptsButton"),
   buyPickResult: document.querySelector("#buyPickResult"),
@@ -1410,12 +1411,22 @@ function renderConceptFilter() {
   sanitizeConceptFilters();
   const selected = state.settings.conceptFilters || [];
   const options = conceptOptions();
+  const searchText = String((els.conceptSearch && els.conceptSearch.value) || "").trim();
+  const searchKey = conceptKey(searchText);
+  const visibleOptions = searchKey
+    ? options.filter(
+        ({ concept }) =>
+          conceptKey(concept).includes(searchKey) || String(concept).toLowerCase().includes(searchText.toLowerCase()),
+      )
+    : options;
   if (options.length === 0) {
     els.conceptChips.innerHTML = `<span class="concept-empty">${
       state.conceptStatus === "loading" ? "正在读取东方财富概念板块..." : "暂无可用概念标签"
     }</span>`;
+  } else if (visibleOptions.length === 0) {
+    els.conceptChips.innerHTML = `<span class="concept-empty">没有匹配的概念标签</span>`;
   } else {
-    els.conceptChips.innerHTML = options
+    els.conceptChips.innerHTML = visibleOptions
       .map(({ concept, count, loaded }) => {
         const active = selected.some((item) => conceptKey(item) === conceptKey(concept));
         return `<button class="concept-chip${active ? " is-active" : ""}" type="button" data-concept="${escapeHtml(
@@ -1433,6 +1444,8 @@ function renderConceptFilter() {
     ? pendingConcepts.length > 0
       ? `已锁定：${selected.join(" + ")}；正在读取 ${pendingConcepts.join(" + ")} 的成分股。`
       : `已锁定：${selected.join(" + ")}；列表仅显示东方财富概念板块成分股同时命中的股票。`
+    : searchKey && options.length > 0
+      ? `正在搜索：${searchText}；显示 ${visibleOptions.length}/${options.length} 个概念。`
     : state.conceptStatus === "loading"
       ? "正在从东方财富读取概念板块列表。"
       : "未锁定概念，显示全部股池。概念来自东方财富概念板块。";
@@ -1835,6 +1848,7 @@ els.clearForm.addEventListener("click", clearForm);
 els.refresh.addEventListener("click", refreshStocks);
 els.refreshDefaultPrompt.addEventListener("click", refreshDefaultPrompt);
 els.userRequirements.addEventListener("input", saveUserRequirements);
+if (els.conceptSearch) els.conceptSearch.addEventListener("input", renderConceptFilter);
 els.conceptChips.addEventListener("click", (event) => {
   const button = event.target.closest("[data-concept]");
   if (!button) return;

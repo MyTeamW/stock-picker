@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>选股助手</title>
-    <link rel="stylesheet" href="./styles.css?v=20260521-3" />
+    <link rel="stylesheet" href="./styles.css?v=20260602-2" />
   </head>
   <body>
     <main class="shell">
@@ -57,6 +57,13 @@
               <div class="concept-filter-head">
                 <span>概念筛选</span>
                 <div class="concept-filter-actions">
+                  <input
+                    id="conceptSearchInput"
+                    class="concept-search"
+                    type="search"
+                    placeholder="搜索概念"
+                    aria-label="搜索概念"
+                  />
                   <button id="refreshConceptsButton" class="link-button" type="button">刷新概念</button>
                   <button id="clearConceptFilterButton" class="link-button" type="button">清空</button>
                 </div>
@@ -145,6 +152,6 @@
       </tr>
     </template>
 
-    <script src="./app.js?v=20260521-3"></script>
+    <script src="./app.js?v=20260602-2"></script>
   </body>
 </html>
