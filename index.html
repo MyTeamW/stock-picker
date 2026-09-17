@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>选股助手</title>
-    <link rel="stylesheet" href="./styles.css?v=20260602-2" />
+    <link rel="stylesheet" href="./styles.css?v=20260917-1" />
   </head>
   <body>
     <main class="shell">
@@ -39,14 +39,16 @@
               <h3>AI 分析输入</h3>
             </div>
             <div class="assistant-actions">
-              <button id="refreshDefaultPromptButton" class="secondary" type="button">刷新默认提示词</button>
+              <button id="clearPromptButton" class="secondary" type="button">清空提示词</button>
+              <button id="recommendFromPromptButton" class="primary" type="button">根据提示词推荐</button>
             </div>
           </div>
           <div class="prompt-stack">
             <label class="prompt-box">
               <span>我的要求（可输入）</span>
-              <textarea id="userRequirementsInput" rows="5" placeholder="例如：只做短线、不要追高；持仓股优先控制回撤。"></textarea>
+              <textarea id="userRequirementsInput" rows="5" maxlength="4000" placeholder="例如：只做短线、不要追高；持仓股优先控制回撤。"></textarea>
             </label>
+            <div id="manualRecommendationStatus" class="request-status" role="status" aria-live="polite"></div>
           </div>
           <section class="pool-card" aria-label="股池列表">
             <div class="pool-head">
@@ -152,6 +154,6 @@
       </tr>
     </template>
 
-    <script src="./app.js?v=20260602-2"></script>
+    <script src="./app.js?v=20260917-1"></script>
   </body>
 </html>

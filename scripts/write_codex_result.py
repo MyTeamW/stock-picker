@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from typing import Any
@@ -10,8 +11,7 @@ except ModuleNotFoundError:
   from scripts.run_picker_automation import RESULT_TABLE, now_china, supabase
 
 
-def read_payload() -> dict[str, Any]:
-  path = sys.argv[1] if len(sys.argv) > 1 else "-"
+def read_payload(path: str) -> dict[str, Any]:
   if path == "-":
     text = sys.stdin.read()
   else:
@@ -23,6 +23,13 @@ def read_payload() -> dict[str, Any]:
   if not isinstance(payload, dict):
     raise ValueError("result payload must be a JSON object")
   return payload
+
+
+def parse_args() -> argparse.Namespace:
+  parser = argparse.ArgumentParser(description="Write a Codex stock recommendation result to Supabase.")
+  parser.add_argument("path", nargs="?", default="-")
+  parser.add_argument("--request-id", default="")
+  return parser.parse_args()
 
 
 def text(value: Any) -> str:
@@ -161,14 +168,32 @@ def normalize(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> None:
-  result = normalize(read_payload())
+  args = parse_args()
+  result = normalize(read_payload(args.path))
   supabase(
     f"{RESULT_TABLE}?on_conflict=trade_date",
     method="POST",
     body=result,
     prefer="resolution=merge-duplicates,return=minimal",
   )
-  print(json.dumps({"written": True, "trade_date": result["trade_date"], "title": result["title"]}, ensure_ascii=False))
+  request_completed = False
+  if args.request_id:
+    try:
+      from manual_request import complete_request
+    except ModuleNotFoundError:
+      from scripts.manual_request import complete_request
+    request_completed = bool(complete_request(args.request_id, result["generated_at"]).get("completed"))
+  print(
+    json.dumps(
+      {
+        "written": True,
+        "trade_date": result["trade_date"],
+        "title": result["title"],
+        "request_completed": request_completed,
+      },
+      ensure_ascii=False,
+    )
+  )
 
 
 if __name__ == "__main__":

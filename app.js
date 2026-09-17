@@ -8,6 +8,8 @@ const TRACKER_URL = "https://myteamw.github.io/tracker/";
 const SETTINGS_TABLE = "picker_settings";
 const RESULT_TABLE = "picker_results";
 const SETTINGS_ROW_KEY = "default";
+const MANUAL_REQUEST_ROW_KEY = "manual-recommendation";
+const MANUAL_REQUEST_POLL_MS = 10000;
 const DEFAULT_USER_REQUIREMENTS = "价格区间 0.00 - 70.00 元；计划买入 1 手（100 股）。";
 const CONCEPT_CACHE_KEY = "myteamw-stock-picker-concept-boards-v2";
 const CONCEPT_CACHE_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
@@ -49,10 +51,12 @@ const state = {
   settings: { ...DEFAULT_SETTINGS },
   editingCode: "",
   automationResult: null,
+  manualRequest: null,
   remoteReady: false,
 };
 
 let settingsSyncTimer = null;
+let manualRequestPollTimer = null;
 
 const els = {
   clock: document.querySelector("#clockText"),
@@ -76,7 +80,9 @@ const els = {
   buyPickResult: document.querySelector("#buyPickResult"),
   holdingAdviceResult: document.querySelector("#holdingAdviceResult"),
   userRequirements: document.querySelector("#userRequirementsInput"),
-  refreshDefaultPrompt: document.querySelector("#refreshDefaultPromptButton"),
+  clearPrompt: document.querySelector("#clearPromptButton"),
+  recommendFromPrompt: document.querySelector("#recommendFromPromptButton"),
+  manualRecommendationStatus: document.querySelector("#manualRecommendationStatus"),
   rows: document.querySelector("#stockRows"),
   template: document.querySelector("#rowTemplate"),
   empty: document.querySelector("#emptyState"),
@@ -210,7 +216,8 @@ function normalizeSettings(raw = {}) {
   const minPrice = Math.max(0, Number(raw.minPrice ?? DEFAULT_SETTINGS.minPrice) || DEFAULT_SETTINGS.minPrice);
   const maxPrice = Math.max(minPrice, Number(raw.maxPrice ?? DEFAULT_SETTINGS.maxPrice) || DEFAULT_SETTINGS.maxPrice);
   const lot = Math.max(1, Math.floor(Number(raw.lot ?? DEFAULT_SETTINGS.lot) || DEFAULT_SETTINGS.lot));
-  const userRequirements = String(raw.userRequirements || "").trim() || DEFAULT_USER_REQUIREMENTS;
+  const hasUserRequirements = Object.prototype.hasOwnProperty.call(raw || {}, "userRequirements");
+  const userRequirements = hasUserRequirements ? String(raw.userRequirements ?? "") : DEFAULT_USER_REQUIREMENTS;
   return {
     ...DEFAULT_SETTINGS,
     ...raw,
@@ -224,6 +231,28 @@ function normalizeSettings(raw = {}) {
     conceptFilters: uniqueConcepts(conceptFilters),
     bigPoolConcepts,
   };
+}
+
+function normalizeManualRequest(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const id = String(raw.id || "").trim();
+  const prompt = String(raw.prompt || "").trim();
+  const status = String(raw.status || "").trim().toLowerCase();
+  if (!id || !prompt || !status) return null;
+  return {
+    id,
+    prompt,
+    status,
+    requestedAt: String(raw.requestedAt || raw.requested_at || ""),
+    startedAt: String(raw.startedAt || raw.started_at || ""),
+    completedAt: String(raw.completedAt || raw.completed_at || ""),
+    resultGeneratedAt: String(raw.resultGeneratedAt || raw.result_generated_at || ""),
+    error: String(raw.error || ""),
+  };
+}
+
+function manualRequestIsActive(request = state.manualRequest) {
+  return Boolean(request && ["pending", "processing"].includes(request.status));
 }
 
 function normalizeConcept(value) {
@@ -819,6 +848,33 @@ async function loadRemoteState() {
   saveSettings();
 }
 
+async function loadManualRequest() {
+  try {
+    const rows = await supabaseRequest(
+      `${SETTINGS_TABLE}?select=value&key=eq.${encodeURIComponent(MANUAL_REQUEST_ROW_KEY)}&limit=1`,
+    );
+    state.manualRequest = normalizeManualRequest(Array.isArray(rows) && rows[0] ? rows[0].value : null);
+  } catch {
+    state.manualRequest = null;
+  }
+  renderManualRecommendationState();
+  scheduleManualRequestPoll();
+  return state.manualRequest;
+}
+
+async function upsertManualRequest(request) {
+  const rows = await supabaseRequest(`${SETTINGS_TABLE}?on_conflict=key`, {
+    method: "POST",
+    headers: { Prefer: "resolution=merge-duplicates,return=representation" },
+    body: JSON.stringify({ key: MANUAL_REQUEST_ROW_KEY, value: request }),
+  });
+  const saved = Array.isArray(rows) && rows[0] ? rows[0].value : request;
+  state.manualRequest = normalizeManualRequest(saved);
+  renderManualRecommendationState();
+  scheduleManualRequestPoll();
+  return state.manualRequest;
+}
+
 async function initRemoteState() {
   try {
     await loadRemoteState();
@@ -892,7 +948,7 @@ async function upsertRemoteSettings() {
           pickTime: DEFAULT_SETTINGS.pickTime,
           lot: state.settings.lot,
           defaultPrompt: state.settings.defaultPrompt || "",
-          userRequirements: state.settings.userRequirements || DEFAULT_USER_REQUIREMENTS,
+          userRequirements: state.settings.userRequirements ?? DEFAULT_USER_REQUIREMENTS,
           basePositions: state.settings.basePositions || {},
           conceptFilters: state.settings.conceptFilters || [],
           bigPoolConcepts: state.settings.bigPoolConcepts || {},
@@ -1364,7 +1420,46 @@ function currentDefaultPrompt() {
 }
 
 function renderPromptInputs() {
-  els.userRequirements.value = state.settings.userRequirements || DEFAULT_USER_REQUIREMENTS;
+  els.userRequirements.value = state.settings.userRequirements ?? DEFAULT_USER_REQUIREMENTS;
+  renderManualRecommendationState();
+}
+
+function manualRequestTimestamp(request) {
+  const value = request.completedAt || request.startedAt || request.requestedAt;
+  return value ? formatGeneratedAt(value) : "";
+}
+
+function renderManualRecommendationState() {
+  if (!els.manualRecommendationStatus || !els.recommendFromPrompt) return;
+  const request = state.manualRequest;
+  const status = request ? request.status : "";
+  const time = request ? manualRequestTimestamp(request) : "";
+  const timeSuffix = time ? `（${time}）` : "";
+  let message = "点击后将提交给现有 Codex 推荐任务；交易日 09:00–15:45 通常在 15 分钟内开始处理。";
+
+  if (status === "pending") message = `荐股请求已提交${timeSuffix}，正在等待 Codex 处理。`;
+  if (status === "processing") message = `Codex 正在根据本次提示词分析${timeSuffix}，完成后会自动刷新结果。`;
+  if (status === "completed") message = `本次提示词推荐已完成${timeSuffix}，下方结果已更新。`;
+  if (status === "failed") message = `本次推荐失败${timeSuffix}${request.error ? `：${request.error}` : "，可以重新提交。"}`;
+
+  els.manualRecommendationStatus.className = `request-status${status ? ` is-${status}` : ""}`;
+  els.manualRecommendationStatus.textContent = message;
+  els.recommendFromPrompt.disabled = manualRequestIsActive(request);
+  els.recommendFromPrompt.textContent = status === "processing" ? "正在推荐…" : status === "pending" ? "等待推荐…" : "根据提示词推荐";
+}
+
+function scheduleManualRequestPoll() {
+  window.clearTimeout(manualRequestPollTimer);
+  manualRequestPollTimer = null;
+  if (!manualRequestIsActive()) return;
+  manualRequestPollTimer = window.setTimeout(async () => {
+    const previousStatus = state.manualRequest && state.manualRequest.status;
+    await loadManualRequest();
+    if (previousStatus && state.manualRequest && state.manualRequest.status === "completed") {
+      await loadAutomationResult();
+      setStatus("提示词推荐已更新");
+    }
+  }, MANUAL_REQUEST_POLL_MS);
 }
 
 function renderBigPoolList() {
@@ -1775,13 +1870,57 @@ function scheduleSettingsSync(successText = "页面信息已保存") {
   }, 700);
 }
 
-async function refreshDefaultPrompt() {
-  state.settings.defaultPrompt = buildDefaultPrompt();
+async function clearUserPrompt() {
+  state.settings.userRequirements = "";
   saveSettings();
   renderPromptInputs();
-  setStatus("默认提示词已刷新，正在同步");
-  await upsertRemoteSettings();
-  setStatus("默认提示词已刷新");
+  setStatus("提示词已清空，正在同步");
+  const synced = await upsertRemoteSettings();
+  setStatus(synced ? "提示词已清空" : "提示词已在本机清空，在线同步失败");
+  els.userRequirements.focus();
+}
+
+function manualRequestId() {
+  if (window.crypto && typeof window.crypto.randomUUID === "function") return window.crypto.randomUUID();
+  return `manual-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+async function recommendFromPrompt() {
+  const prompt = els.userRequirements.value.trim();
+  if (!prompt) {
+    setStatus("请先在“我的要求”中输入提示词");
+    els.userRequirements.focus();
+    return;
+  }
+  if (manualRequestIsActive()) {
+    setStatus("已有荐股请求正在处理中，请等待完成");
+    return;
+  }
+
+  state.settings.userRequirements = prompt;
+  saveSettings();
+  renderManualRecommendationState();
+  setStatus("正在保存提示词并提交荐股请求");
+  const settingsSaved = await upsertRemoteSettings();
+  if (!settingsSaved) {
+    setStatus("提示词保存失败，未提交荐股请求");
+    return;
+  }
+
+  const request = {
+    id: manualRequestId(),
+    prompt,
+    status: "pending",
+    requestedAt: new Date().toISOString(),
+  };
+  try {
+    await upsertManualRequest(request);
+    setStatus("荐股请求已提交，页面会在完成后自动更新");
+  } catch {
+    state.manualRequest = null;
+    renderManualRecommendationState();
+    setStatus("荐股请求提交失败，请稍后重试");
+  }
 }
 
 function saveUserRequirements() {
@@ -1846,7 +1985,8 @@ async function refreshConceptsFromButton() {
 els.form.addEventListener("submit", upsertStockFromForm);
 els.clearForm.addEventListener("click", clearForm);
 els.refresh.addEventListener("click", refreshStocks);
-els.refreshDefaultPrompt.addEventListener("click", refreshDefaultPrompt);
+els.clearPrompt.addEventListener("click", clearUserPrompt);
+els.recommendFromPrompt.addEventListener("click", recommendFromPrompt);
 els.userRequirements.addEventListener("input", saveUserRequirements);
 if (els.conceptSearch) els.conceptSearch.addEventListener("input", renderConceptFilter);
 els.conceptChips.addEventListener("click", (event) => {
@@ -1869,4 +2009,5 @@ updateClock();
 render();
 initRemoteState();
 loadAutomationResult();
+loadManualRequest();
 window.setInterval(updateClock, 1000);

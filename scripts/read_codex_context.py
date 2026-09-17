@@ -54,10 +54,22 @@ PAGE_URL = "https://myteamw.github.io/stock-picker/"
 TRACKER_URL = "https://myteamw.github.io/tracker/"
 TRACKER_STOCK_TABLE = os.environ.get("TRACKER_STOCK_TABLE") or "stocks"
 BIG_POOL_REFRESH_LIMIT = int(os.environ.get("PICKER_BIG_POOL_REFRESH_LIMIT") or "180")
+MANUAL_REQUEST_ROW_KEY = "manual-recommendation"
 
 
 def now_china() -> datetime:
   return datetime.now(CHINA_TZ)
+
+
+def load_manual_request() -> dict[str, Any] | None:
+  rows = supabase(f"{SETTINGS_TABLE}?select=value&key=eq.{MANUAL_REQUEST_ROW_KEY}&limit=1")
+  if not isinstance(rows, list) or not rows or not isinstance(rows[0].get("value"), dict):
+    return None
+  request = dict(rows[0]["value"])
+  if str(request.get("status") or "").lower() not in {"pending", "processing"}:
+    return request
+  prompt = str(request.get("prompt") or "").strip()
+  return request if prompt else None
 
 
 def compact_money(value: Any) -> str:
@@ -552,6 +564,7 @@ def main() -> None:
   big_pool_stocks = attach_big_pool_concepts(big_pool_stocks)
 
   settings = load_settings()
+  manual_request = load_manual_request()
   settings["pickTime"] = "14:30"
   settings["bigPoolConcepts"] = {
     str(stock.get("code")): parse_concepts(stock.get("concepts"))
@@ -584,7 +597,10 @@ def main() -> None:
   )
   persist_default_prompt(settings, default_prompt)
   settings["defaultPrompt"] = default_prompt
-  user_requirements = str(settings.get("userRequirements") or "")
+  manual_prompt = ""
+  if manual_request and str(manual_request.get("status") or "").lower() in {"pending", "processing"}:
+    manual_prompt = str(manual_request.get("prompt") or "").strip()
+  user_requirements = manual_prompt or str(settings.get("userRequirements") or "")
   combined_prompt = build_combined_prompt(default_prompt, user_requirements)
 
   context = {
@@ -598,6 +614,7 @@ def main() -> None:
       "results": RESULT_TABLE,
     },
     "settings": settings,
+    "manual_request": manual_request,
     "concept_filters": filters,
     "locked_big_pool_count": len(locked_big_pool_stocks),
     "big_pool_stocks": [normalize_big_pool_stock(stock) for stock in big_pool_stocks],
@@ -623,7 +640,7 @@ def main() -> None:
     "page_prompt": combined_prompt,
     "write_result_schema": build_writer_schema(),
     "next_step": (
-      "Use default_prompt, user_requirements, big_pool_stocks, big_pool_ranked_candidates, holding_stocks, and refreshed quote data to reason in Codex. "
+      "Use default_prompt, user_requirements, manual_request, big_pool_stocks, big_pool_ranked_candidates, holding_stocks, and refreshed quote data to reason in Codex. "
       "Generate a two-part result JSON with buy_recommendation and holding_advice, then pass only the final JSON to scripts/write_codex_result.py. "
       "Do not use GitHub Actions for the daily analysis."
     ),

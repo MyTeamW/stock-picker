@@ -297,6 +297,8 @@ textarea:focus {
 
 .assistant-actions {
   display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
 }
 
@@ -548,6 +550,29 @@ textarea:focus {
   line-height: 1.55;
 }
 
+.request-status {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.request-status.is-pending,
+.request-status.is-processing {
+  color: var(--warn);
+  font-weight: 700;
+}
+
+.request-status.is-completed {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.request-status.is-failed {
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .base-position-detail {
   min-height: 22px;
   font-size: 13px;
@@ -756,6 +781,19 @@ td:nth-child(6) {
   .shell {
     width: min(100vw - 20px, 1260px);
     padding: 18px 0;
+  }
+
+  .assistant-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .assistant-actions {
+    justify-content: stretch;
+  }
+
+  .assistant-actions button {
+    flex: 1 1 0;
   }
 
   .topbar,
