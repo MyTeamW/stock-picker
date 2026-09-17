@@ -962,6 +962,37 @@ async function upsertRemoteSettings() {
   }
 }
 
+async function upsertRemoteUserRequirements(userRequirements) {
+  try {
+    const rows = await supabaseRequest(
+      `${SETTINGS_TABLE}?select=value&key=eq.${encodeURIComponent(SETTINGS_ROW_KEY)}&limit=1`,
+    );
+    const remoteValue =
+      Array.isArray(rows) &&
+      rows[0] &&
+      rows[0].value &&
+      typeof rows[0].value === "object" &&
+      !Array.isArray(rows[0].value)
+        ? rows[0].value
+        : {};
+    await supabaseRequest(`${SETTINGS_TABLE}?on_conflict=key`, {
+      method: "POST",
+      headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({
+        key: SETTINGS_ROW_KEY,
+        value: {
+          ...remoteValue,
+          userRequirements: String(userRequirements ?? ""),
+        },
+      }),
+    });
+    return true;
+  } catch (error) {
+    console.warn("User requirements sync failed", error);
+    return false;
+  }
+}
+
 function jsonp(url, callbackParam = "cb") {
   return new Promise((resolve, reject) => {
     const callback = `stockPicker_${Date.now()}_${Math.random().toString(16).slice(2)}`;
@@ -1871,12 +1902,23 @@ function scheduleSettingsSync(successText = "页面信息已保存") {
   }, 700);
 }
 
+function scheduleUserRequirementsSync(successText = "我的要求已保存") {
+  saveSettings();
+  window.clearTimeout(settingsSyncTimer);
+  settingsSyncTimer = window.setTimeout(async () => {
+    const synced = await upsertRemoteUserRequirements(state.settings.userRequirements);
+    if (synced) setStatus(successText);
+  }, 700);
+}
+
 async function clearUserPrompt() {
   state.settings.userRequirements = "";
   saveSettings();
   renderPromptInputs();
   setStatus("提示词已清空，正在同步");
-  const synced = await upsertRemoteSettings();
+  window.clearTimeout(settingsSyncTimer);
+  settingsSyncTimer = null;
+  const synced = await upsertRemoteUserRequirements("");
   setStatus(synced ? "提示词已清空" : "提示词已在本机清空，在线同步失败");
   els.userRequirements.focus();
 }
@@ -1904,7 +1946,7 @@ async function recommendFromPrompt() {
   setStatus("正在保存提示词并提交荐股请求");
   window.clearTimeout(settingsSyncTimer);
   settingsSyncTimer = null;
-  const settingsSaved = await upsertRemoteSettings();
+  const settingsSaved = await upsertRemoteUserRequirements(prompt);
 
   const request = {
     id: manualRequestId(),
@@ -1929,7 +1971,7 @@ async function recommendFromPrompt() {
 
 function saveUserRequirements() {
   state.settings.userRequirements = els.userRequirements.value.trim();
-  scheduleSettingsSync("我的要求已保存");
+  scheduleUserRequirementsSync("我的要求已保存");
 }
 
 function saveBasePosition(code, value) {
