@@ -501,8 +501,8 @@ async function supabaseRequest(path, options = {}) {
     const text = await response.text();
     throw new Error(text || `Supabase HTTP ${response.status}`);
   }
-  if (response.status === 204) return null;
-  return response.json();
+  const text = await response.text();
+  return text.trim() ? JSON.parse(text) : null;
 }
 
 function fromDb(row) {
