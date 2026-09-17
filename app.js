@@ -956,7 +956,8 @@ async function upsertRemoteSettings() {
       }),
   });
     return true;
-  } catch {
+  } catch (error) {
+    console.warn("Picker settings sync failed", error);
     return false;
   }
 }
@@ -1901,11 +1902,9 @@ async function recommendFromPrompt() {
   saveSettings();
   renderManualRecommendationState();
   setStatus("正在保存提示词并提交荐股请求");
+  window.clearTimeout(settingsSyncTimer);
+  settingsSyncTimer = null;
   const settingsSaved = await upsertRemoteSettings();
-  if (!settingsSaved) {
-    setStatus("提示词保存失败，未提交荐股请求");
-    return;
-  }
 
   const request = {
     id: manualRequestId(),
@@ -1915,8 +1914,13 @@ async function recommendFromPrompt() {
   };
   try {
     await upsertManualRequest(request);
-    setStatus("荐股请求已提交，页面会在完成后自动更新");
-  } catch {
+    setStatus(
+      settingsSaved
+        ? "荐股请求已提交，页面会在完成后自动更新"
+        : "荐股请求已提交；提示词常规设置将在稍后同步",
+    );
+  } catch (error) {
+    console.error("Manual recommendation request failed", error);
     state.manualRequest = null;
     renderManualRecommendationState();
     setStatus("荐股请求提交失败，请稍后重试");
