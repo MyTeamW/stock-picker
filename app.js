@@ -29,7 +29,7 @@ const STATIC_STOCK_CONCEPTS_URL = "./stock-concepts.json?v=20260602";
 const DEFAULT_SETTINGS = {
   minPrice: 0,
   maxPrice: 70,
-  pickTime: "14:30",
+  pickTime: "14:15",
   lot: 1,
   defaultPrompt: "",
   userRequirements: DEFAULT_USER_REQUIREMENTS,
@@ -38,7 +38,8 @@ const DEFAULT_SETTINGS = {
   bigPoolConcepts: {},
 };
 
-const EMPTY_BUY_TEXT = "暂无 Codex 自动化选股结果。定时对话写入结果后这里会自动显示。";
+const EMPTY_MANUAL_BUY_TEXT = "暂无根据提示词生成的手动推荐。";
+const EMPTY_SCHEDULED_BUY_TEXT = "暂无交易日 14:15 自动推荐。";
 const EMPTY_HOLDING_TEXT = "暂无持仓操作建议。填写底仓明细后，下一次自动化会生成对应建议。";
 
 const state = {
@@ -50,7 +51,8 @@ const state = {
   conceptStatus: "idle",
   settings: { ...DEFAULT_SETTINGS },
   editingCode: "",
-  automationResult: null,
+  manualResult: null,
+  scheduledResult: null,
   manualRequest: null,
   remoteReady: false,
 };
@@ -77,7 +79,8 @@ const els = {
   conceptSearch: document.querySelector("#conceptSearchInput"),
   clearConceptFilter: document.querySelector("#clearConceptFilterButton"),
   refreshConcepts: document.querySelector("#refreshConceptsButton"),
-  buyPickResult: document.querySelector("#buyPickResult"),
+  manualBuyPickResult: document.querySelector("#manualBuyPickResult"),
+  scheduledBuyPickResult: document.querySelector("#scheduledBuyPickResult"),
   holdingAdviceResult: document.querySelector("#holdingAdviceResult"),
   userRequirements: document.querySelector("#userRequirementsInput"),
   clearPrompt: document.querySelector("#clearPromptButton"),
@@ -812,6 +815,7 @@ function fromResultDb(row) {
   const holdingSource = structured && (structured.holding_advice || structured.holdingAdvice);
   return {
     active: row.active !== false,
+    resultType: row.result_type || "scheduled",
     generatedAt: row.generated_at || row.created_at || "",
     ...flat,
     prompt: row.prompt || "",
@@ -1414,28 +1418,23 @@ function scoreBigPoolStock(stock) {
   return score;
 }
 
-function rankedBigPoolStocks() {
-  return filteredBigPoolStocks()
+function buildDefaultPrompt() {
+  const bigRanked = state.bigPool
     .map((stock) => ({ ...stock, score: scoreBigPoolStock(stock) }))
     .sort((a, b) => b.score - a.score)
     .filter((stock) => stock.score > 0);
-}
-
-function buildDefaultPrompt() {
-  const bigRanked = rankedBigPoolStocks();
-  const lockedPool = filteredBigPoolStocks();
-  const bigCandidates = (bigRanked.length > 0 ? bigRanked : lockedPool).slice(0, 12);
+  const bigCandidates = (bigRanked.length > 0 ? bigRanked : state.bigPool).slice(0, 12);
   const holdings = holdingStocks();
   const bigCandidateText = bigCandidates.map(buildBigPoolLine).join("\n") || "暂无可用大池股票。";
   const holdingText = holdings.map(buildCandidateLine).join("\n") || "暂无已填写底仓的持仓股票。";
   const lotShares = Number(state.settings.lot) * 100;
   const conceptText = (state.settings.conceptFilters || []).length
-    ? `当前锁定概念：${state.settings.conceptFilters.join(" + ")}；大池中同时命中 ${lockedPool.length} 只。`
-    : "当前未锁定概念，默认从全部大池中选择。";
+    ? `页面当前锁定概念：${state.settings.conceptFilters.join(" + ")}；这只用于页面浏览，不得作为选股依据；推荐仍须检查全部 ${state.bigPool.length} 只大池股票。`
+    : "概念筛选只用于页面浏览，不作为选股依据；必须从全部大池股票中选择。";
 
   return [
     "请你作为谨慎的 A 股短线助手，今天要分开完成两个部分。",
-    `今日选股推荐：从大池子（${TRACKER_URL}）中只推荐 1 只今日买入观察标的；以交易日 14:30 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，但不要机械照搬页面排序。`,
+    `今日选股推荐：从大池子（${TRACKER_URL}）中只推荐 1 只今日买入观察标的；以交易日 14:15 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，但不要机械照搬页面排序。`,
     conceptText,
     "持仓操作建议：只对已经持仓的股票给后续操作建议；是否持仓以“底仓明细”非空为准，未填写底仓明细的股票不当作持仓处理。",
     `我的设置：价格区间 ${money(state.settings.minPrice)} - ${money(
@@ -1578,7 +1577,7 @@ function renderConceptFilter() {
       : "未锁定概念，显示全部股池。概念来自东方财富概念板块。";
 }
 
-function renderResultBlock(container, section, emptyText) {
+function renderResultBlock(container, result, section, emptyText) {
   if (!section) {
     container.textContent = emptyText;
     return;
@@ -1586,8 +1585,8 @@ function renderResultBlock(container, section, emptyText) {
   const title = section.title || "自动化分析结果";
   const summary = section.summary || "";
   const generatedAt =
-    state.automationResult && state.automationResult.generatedAt
-      ? ` <span class="muted">生成时间：${escapeHtml(formatGeneratedAt(state.automationResult.generatedAt))}</span>`
+    result && result.generatedAt
+      ? ` <span class="muted">生成时间：${escapeHtml(formatGeneratedAt(result.generatedAt))}</span>`
       : "";
   container.innerHTML = `
     <div class="result-title"><strong>${escapeHtml(title)}</strong>${generatedAt}</div>
@@ -1604,17 +1603,24 @@ function renderResultBlock(container, section, emptyText) {
   `;
 }
 
-function renderBuyPickResult() {
-  if (state.automationResult) {
-    renderResultBlock(els.buyPickResult, state.automationResult.buyRecommendation, EMPTY_BUY_TEXT);
-    return;
-  }
-
-  els.buyPickResult.textContent = EMPTY_BUY_TEXT;
+function renderBuyPickResults() {
+  renderResultBlock(
+    els.manualBuyPickResult,
+    state.manualResult,
+    state.manualResult && state.manualResult.buyRecommendation,
+    EMPTY_MANUAL_BUY_TEXT,
+  );
+  renderResultBlock(
+    els.scheduledBuyPickResult,
+    state.scheduledResult,
+    state.scheduledResult && state.scheduledResult.buyRecommendation,
+    EMPTY_SCHEDULED_BUY_TEXT,
+  );
 }
 
 function renderHoldingAdvice() {
-  const advice = state.automationResult ? state.automationResult.holdingAdvice : [];
+  const holdingResult = state.scheduledResult || state.manualResult;
+  const advice = holdingResult ? holdingResult.holdingAdvice : [];
   if (!advice || advice.length === 0) {
     els.holdingAdviceResult.textContent = EMPTY_HOLDING_TEXT;
     return;
@@ -1691,20 +1697,25 @@ function render() {
     els.rows.appendChild(row);
   }
 
-  renderBuyPickResult();
+  renderBuyPickResults();
   renderHoldingAdvice();
 }
 
 async function loadAutomationResult() {
   try {
-    const rows = await supabaseRequest(`${RESULT_TABLE}?select=*&active=eq.true&order=generated_at.desc&limit=1`);
-    if (Array.isArray(rows) && rows[0]) {
-      state.automationResult = fromResultDb(rows[0]);
-      renderBuyPickResult();
-      renderHoldingAdvice();
-      setStatus("已加载自动化选股结果");
-      return;
-    }
+    const [manualRows, scheduledRows] = await Promise.all([
+      supabaseRequest(
+        `${RESULT_TABLE}?select=*&active=eq.true&result_type=eq.manual&order=generated_at.desc&limit=1`,
+      ),
+      supabaseRequest(
+        `${RESULT_TABLE}?select=*&active=eq.true&result_type=eq.scheduled&order=generated_at.desc&limit=1`,
+      ),
+    ]);
+    state.manualResult = Array.isArray(manualRows) && manualRows[0] ? fromResultDb(manualRows[0]) : null;
+    state.scheduledResult = Array.isArray(scheduledRows) && scheduledRows[0] ? fromResultDb(scheduledRows[0]) : null;
+    renderBuyPickResults();
+    renderHoldingAdvice();
+    setStatus("已加载手动和自动选股结果");
   } catch {
     setStatus("自动化结果表未就绪");
   }

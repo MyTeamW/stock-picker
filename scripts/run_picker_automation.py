@@ -311,7 +311,7 @@ def load_settings() -> dict[str, Any]:
   settings = {
     "minPrice": 0,
     "maxPrice": 70,
-    "pickTime": "14:30",
+    "pickTime": "14:15",
     "lot": 1,
     "defaultPrompt": "",
     "userRequirements": DEFAULT_USER_REQUIREMENTS,
@@ -324,7 +324,7 @@ def load_settings() -> dict[str, Any]:
     return settings
   if isinstance(rows, list) and rows and isinstance(rows[0].get("value"), dict):
     settings.update(rows[0]["value"])
-  settings["pickTime"] = "14:30"
+  settings["pickTime"] = "14:15"
   if not isinstance(settings.get("basePositions"), dict):
     settings["basePositions"] = {}
   if not isinstance(settings.get("conceptFilters"), list):

@@ -29,6 +29,7 @@ def parse_args() -> argparse.Namespace:
   parser = argparse.ArgumentParser(description="Write a Codex stock recommendation result to Supabase.")
   parser.add_argument("path", nargs="?", default="-")
   parser.add_argument("--request-id", default="")
+  parser.add_argument("--result-type", choices=("manual", "scheduled"), default="")
   return parser.parse_args()
 
 
@@ -170,8 +171,9 @@ def normalize(payload: dict[str, Any]) -> dict[str, Any]:
 def main() -> None:
   args = parse_args()
   result = normalize(read_payload(args.path))
+  result["result_type"] = args.result_type or ("manual" if args.request_id else "scheduled")
   supabase(
-    f"{RESULT_TABLE}?on_conflict=trade_date",
+    f"{RESULT_TABLE}?on_conflict=trade_date,result_type",
     method="POST",
     body=result,
     prefer="resolution=merge-duplicates,return=minimal",
@@ -188,6 +190,7 @@ def main() -> None:
       {
         "written": True,
         "trade_date": result["trade_date"],
+        "result_type": result["result_type"],
         "title": result["title"],
         "request_completed": request_completed,
       },

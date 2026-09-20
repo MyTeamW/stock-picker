@@ -29,7 +29,8 @@ create table if not exists public.picker_settings (
 );
 
 create table if not exists public.picker_results (
-  trade_date date primary key,
+  trade_date date not null,
+  result_type text not null default 'scheduled' check (result_type in ('manual', 'scheduled')),
   generated_at timestamptz not null default now(),
   title text not null,
   summary text not null,
@@ -42,11 +43,30 @@ create table if not exists public.picker_results (
   source_count integer not null default 0,
   active boolean not null default true,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  primary key (trade_date, result_type)
 );
 
-create index if not exists picker_results_active_idx
-on public.picker_results (active, generated_at desc);
+alter table public.picker_results
+add column if not exists result_type text not null default 'scheduled';
+
+alter table public.picker_results
+drop constraint if exists picker_results_result_type_check;
+
+alter table public.picker_results
+add constraint picker_results_result_type_check
+check (result_type in ('manual', 'scheduled'));
+
+alter table public.picker_results
+drop constraint if exists picker_results_pkey;
+
+alter table public.picker_results
+add constraint picker_results_pkey primary key (trade_date, result_type);
+
+drop index if exists public.picker_results_active_idx;
+
+create index picker_results_active_idx
+on public.picker_results (active, result_type, generated_at desc);
 
 alter table public.picker_stocks enable row level security;
 alter table public.picker_settings enable row level security;
@@ -106,6 +126,7 @@ with check (true);
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
+set search_path = ''
 as $$
 begin
   new.updated_at = now();
@@ -132,6 +153,6 @@ for each row
 execute function public.set_updated_at();
 
 insert into public.picker_settings (key, value)
-values ('default', '{"minPrice":0,"maxPrice":70,"pickTime":"14:30","lot":1}'::jsonb)
+values ('default', '{"minPrice":0,"maxPrice":70,"pickTime":"14:15","lot":1}'::jsonb)
 on conflict (key) do update
-set value = public.picker_settings.value || '{"pickTime":"14:30"}'::jsonb;
+set value = public.picker_settings.value || '{"pickTime":"14:15"}'::jsonb;

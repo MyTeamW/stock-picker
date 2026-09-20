@@ -489,6 +489,26 @@ textarea:focus {
   font-size: 12px;
 }
 
+.result-stack,
+.result-box {
+  display: grid;
+  gap: 10px;
+}
+
+.result-stack {
+  gap: 14px;
+}
+
+.result-box {
+  min-width: 0;
+}
+
+.result-heading {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .pick-result {
   min-height: 58px;
   border: 1px solid #d7e7e4;
@@ -504,6 +524,12 @@ textarea:focus {
   background: #fffaf7;
   border-color: #efd7cc;
   color: #4a332b;
+}
+
+.scheduled-result {
+  border-color: #d9dfec;
+  background: #f7f8fc;
+  color: #29364f;
 }
 
 .pick-result strong {

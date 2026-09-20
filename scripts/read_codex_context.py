@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
-import sys
 import time
 from datetime import datetime
 from http.client import RemoteDisconnected
@@ -487,21 +487,21 @@ def build_default_prompt(
     holding_candidates = "暂无已填写底仓的持仓股票。"
   filters = concept_filters(settings)
   concept_text = (
-    f"当前锁定概念：{' + '.join(filters)}；大池中同时命中 {len(big_pool_stocks)}/{total_big_pool_count} 只。"
+    f"页面当前锁定概念：{' + '.join(filters)}；这只用于页面浏览，不得作为选股依据；自动推荐仍须检查全部 {total_big_pool_count} 只大池股票。"
     if filters
-    else "当前未锁定概念，默认从全部大池中选择。"
+    else "概念筛选只用于页面浏览，不作为选股依据；必须从全部大池股票中选择。"
   )
 
   return (
     "请你作为谨慎的 A 股短线助手，今天要分开完成两个部分。\n\n"
     f"今日选股推荐：从大池子（{TRACKER_URL}）中只推荐 1 只今日买入观察标的；"
-    "以交易日 14:30 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，"
+    "以交易日 14:15 附近行情为主，可参考大池历史最高价、回撤、备注和流动性，"
     "但不要机械照搬页面排序。\n\n"
     f"{concept_text}\n\n"
     "持仓操作建议：只对已经持仓的股票给后续操作建议；是否持仓以“底仓明细”非空为准，"
     "未填写底仓明细的股票不当作持仓处理。\n\n"
     f"我的设置：价格区间 {money(settings.get('minPrice'))} - {money(settings.get('maxPrice'))} 元；"
-    f"默认选股时间 {settings.get('pickTime') or '14:30'}；计划买入 {int(settings.get('lot') or 1)} 手"
+    f"默认选股时间 {settings.get('pickTime') or '14:15'}；计划买入 {int(settings.get('lot') or 1)} 手"
     f"（{int(settings.get('lot') or 1) * 100} 股）。\n\n"
     f"大池候选摘要：\n{big_candidates}\n\n"
     f"已持仓股票：\n{holding_candidates}"
@@ -519,7 +519,7 @@ def build_combined_prompt(default_prompt: str, user_requirements: str) -> str:
 def persist_default_prompt(settings: dict[str, Any], default_prompt: str) -> None:
   updated = dict(settings)
   updated["defaultPrompt"] = default_prompt
-  updated["pickTime"] = "14:30"
+  updated["pickTime"] = "14:15"
   supabase(
     f"{SETTINGS_TABLE}?on_conflict=key",
     method="POST",
@@ -541,11 +541,20 @@ def build_writer_schema() -> dict[str, str]:
     "candidate_code": "可选，今日选股推荐 6 位股票代码；没有候选时为 null",
     "candidate_name": "可选，今日选股推荐股票简称；没有候选时为 null",
     "source_count": "可选，本次读取的大池股票数量",
+    "result_type": "由写入命令指定：手动请求用 manual，14:15 定时任务用 scheduled",
   }
 
 
+def parse_args() -> argparse.Namespace:
+  parser = argparse.ArgumentParser(description="Build refreshed context for Codex stock recommendations.")
+  parser.add_argument("--refresh-quotes", action="store_true")
+  parser.add_argument("--mode", choices=("manual", "scheduled"), default="manual")
+  return parser.parse_args()
+
+
 def main() -> None:
-  refresh_quotes = "--refresh-quotes" in sys.argv
+  args = parse_args()
+  refresh_quotes = args.refresh_quotes
   holding_rows = supabase(f"{STOCK_TABLE}?select=*&deleted=eq.false&order=created_at.desc,code.asc")
   if not isinstance(holding_rows, list):
     raise RuntimeError("holding stock query did not return a list")
@@ -565,7 +574,7 @@ def main() -> None:
 
   settings = load_settings()
   manual_request = load_manual_request()
-  settings["pickTime"] = "14:30"
+  settings["pickTime"] = "14:15"
   settings["bigPoolConcepts"] = {
     str(stock.get("code")): parse_concepts(stock.get("concepts"))
     for stock in big_pool_stocks
@@ -577,7 +586,7 @@ def main() -> None:
   holding_list = held_stocks(stocks, settings)
   locked_big_pool_stocks = filter_big_pool_by_concepts(big_pool_stocks, filters)
   big_pool_ranked = sorted(
-    [(score_big_pool_stock(stock, settings), stock) for stock in locked_big_pool_stocks],
+    [(score_big_pool_stock(stock, settings), stock) for stock in big_pool_stocks],
     key=lambda item: item[0],
     reverse=True,
   )
@@ -591,21 +600,26 @@ def main() -> None:
   default_prompt = build_default_prompt(
     settings,
     big_pool_ranked,
-    locked_big_pool_stocks,
+    big_pool_stocks,
     holding_list,
     len(big_pool_stocks),
   )
   persist_default_prompt(settings, default_prompt)
   settings["defaultPrompt"] = default_prompt
-  manual_prompt = ""
-  if manual_request and str(manual_request.get("status") or "").lower() in {"pending", "processing"}:
-    manual_prompt = str(manual_request.get("prompt") or "").strip()
-  user_requirements = manual_prompt or str(settings.get("userRequirements") or "")
-  combined_prompt = build_combined_prompt(default_prompt, user_requirements)
+  if args.mode == "scheduled":
+    user_requirements = ""
+    combined_prompt = default_prompt
+  else:
+    manual_prompt = ""
+    if manual_request and str(manual_request.get("status") or "").lower() in {"pending", "processing"}:
+      manual_prompt = str(manual_request.get("prompt") or "").strip()
+    user_requirements = manual_prompt or str(settings.get("userRequirements") or "")
+    combined_prompt = build_combined_prompt(default_prompt, user_requirements)
 
   context = {
     "trade_date": now_china().date().isoformat(),
     "generated_at": now_china().isoformat(),
+    "analysis_mode": args.mode,
     "page_url": PAGE_URL,
     "big_pool_url": TRACKER_URL,
     "source_tables": {
@@ -640,9 +654,9 @@ def main() -> None:
     "page_prompt": combined_prompt,
     "write_result_schema": build_writer_schema(),
     "next_step": (
-      "Use default_prompt, user_requirements, manual_request, big_pool_stocks, big_pool_ranked_candidates, holding_stocks, and refreshed quote data to reason in Codex. "
-      "Generate a two-part result JSON with buy_recommendation and holding_advice, then pass only the final JSON to scripts/write_codex_result.py. "
-      "Do not use GitHub Actions for the daily analysis."
+      "Manual mode: treat manual_request.prompt/user_requirements as authoritative. Scheduled mode: ignore user_requirements, combined_prompt additions, concept filters, and manual_request.prompt; select only from the full big_pool_stocks list using default_prompt and refreshed market evidence. "
+      "Generate a two-part result JSON with buy_recommendation and holding_advice, then pass only the final JSON to scripts/write_codex_result.py with the matching --result-type. "
+      "Do not use GitHub Actions for the analysis."
     ),
   }
   print(json.dumps(context, ensure_ascii=False, indent=2))
