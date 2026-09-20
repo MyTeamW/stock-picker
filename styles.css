@@ -521,6 +521,7 @@ textarea:focus {
   background: #f3faf8;
   color: #24443f;
   font-size: 14px;
+  font-weight: 650;
   line-height: 1.55;
 }
 
