@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>选股助手</title>
-    <link rel="stylesheet" href="./styles.css?v=20260920-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260920-2" />
   </head>
   <body>
     <main class="shell">
@@ -76,15 +76,15 @@
             <div id="bigPoolList" class="pool-list">正在读取大池子...</div>
           </section>
           <div class="result-stack" aria-label="今日选股推荐结果">
-            <section class="result-box" aria-labelledby="manualResultTitle">
-              <h3 id="manualResultTitle" class="result-heading">根据要求手动推荐</h3>
-              <div id="manualBuyPickResult" class="pick-result">
+            <section class="result-box result-card" aria-labelledby="manualResultTitle">
+              <span id="manualResultTitle" class="result-heading">根据要求手动推荐</span>
+              <div id="manualBuyPickResult" class="pick-result advice-result">
                 暂无根据提示词生成的手动推荐。
               </div>
             </section>
-            <section class="result-box" aria-labelledby="scheduledResultTitle">
-              <h3 id="scheduledResultTitle" class="result-heading">交易日自动推荐</h3>
-              <div id="scheduledBuyPickResult" class="pick-result scheduled-result">
+            <section class="result-box result-card" aria-labelledby="scheduledResultTitle">
+              <span id="scheduledResultTitle" class="result-heading">交易日自动推荐</span>
+              <div id="scheduledBuyPickResult" class="pick-result advice-result">
                 暂无交易日 14:15 自动推荐。
               </div>
             </section>

@@ -503,10 +503,14 @@ textarea:focus {
   min-width: 0;
 }
 
+.result-box.result-card {
+  padding: 18px;
+}
+
 .result-heading {
   color: var(--muted);
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 650;
 }
 
 .pick-result {
@@ -524,12 +528,6 @@ textarea:focus {
   background: #fffaf7;
   border-color: #efd7cc;
   color: #4a332b;
-}
-
-.scheduled-result {
-  border-color: #d9dfec;
-  background: #f7f8fc;
-  color: #29364f;
 }
 
 .pick-result strong {
