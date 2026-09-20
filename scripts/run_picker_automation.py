@@ -465,10 +465,11 @@ def build_result(stocks: list[dict[str, Any]], settings: dict[str, Any], errors:
 
 
 def write_result(result: dict[str, Any]) -> None:
+  scheduled_result = {**result, "result_type": "scheduled"}
   supabase(
-    f"{RESULT_TABLE}?on_conflict=trade_date",
+    f"{RESULT_TABLE}?on_conflict=trade_date,result_type",
     method="POST",
-    body=result,
+    body=scheduled_result,
     prefer="resolution=merge-duplicates,return=minimal",
   )
 
